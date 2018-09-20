@@ -2011,18 +2011,6 @@ void fib_free_table(struct fib_table *tb)
 	call_rcu(&tb->rcu, __trie_free_rcu);
 }
 
-static bool fib_info_nh_uses_dev(const struct fib_info *fi,
-                              const struct net_device *dev)
-{
-	int i;
-
-	for (i = 0; i < fi->fib_nhs; i++)
-		if (fi->fib_nh[i].fib_nh_dev == dev)
-			return true;
-
-	return false;
-}
-
 static int fn_trie_dump_leaf(struct key_vector *l, struct fib_table *tb,
 			     struct sk_buff *skb, struct netlink_callback *cb,
 			     struct fib_dump_filter *filter)
