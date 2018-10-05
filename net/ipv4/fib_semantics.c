@@ -235,7 +235,6 @@ void fib_nh_release(struct net *net, struct fib_nh *fib_nh)
 static void free_fib_info_rcu(struct rcu_head *head)
 {
 	struct fib_info *fi = container_of(head, struct fib_info, rcu);
-	struct dst_metrics *m;
 
 	if (fi->nh) {
 		nexthop_put(fi->nh);
@@ -245,9 +244,8 @@ static void free_fib_info_rcu(struct rcu_head *head)
 		} endfor_nexthops(fi);
 	}
 
-	m = fi->fib_metrics;
-	if (m != &dst_default_metrics && refcount_dec_and_test(&m->refcnt))
-		kfree(m);
+	ip_fib_metrics_put(fi->fib_metrics);
+
 	kfree(fi);
 }
 
