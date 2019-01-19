@@ -663,13 +663,12 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	}
 	devfreq->max_freq = devfreq->scaling_max_freq = freq;
 
-	dev_set_name(&devfreq->dev, "%s", dev_name(dev));
-	err = device_register(&devfreq->dev);
-	if (err) {
-		mutex_unlock(&devfreq->lock);
-		put_device(&devfreq->dev);
-		goto err_out;
-	}
+	/* Initialize the statistics before publishing the device to sysfs. */
+	srcu_init_notifier_head(&devfreq->transition_notifier_list);
+	device_initialize(&devfreq->dev);
+	err = dev_set_name(&devfreq->dev, "%s", dev_name(dev));
+	if (err)
+		goto err_put_device;
 
 	devfreq->trans_table =
 		devm_kzalloc(&devfreq->dev,
@@ -677,13 +676,25 @@ struct devfreq *devfreq_add_device(struct device *dev,
 					 devfreq->profile->max_state,
 					 devfreq->profile->max_state),
 			     GFP_KERNEL);
+	if (!devfreq->trans_table) {
+		err = -ENOMEM;
+		goto err_put_device;
+	}
+
 	devfreq->time_in_state = devm_kcalloc(&devfreq->dev,
 						devfreq->profile->max_state,
 						sizeof(unsigned long),
 						GFP_KERNEL);
+	if (!devfreq->time_in_state) {
+		err = -ENOMEM;
+		goto err_put_device;
+	}
+
 	devfreq->last_stat_updated = jiffies;
 
-	srcu_init_notifier_head(&devfreq->transition_notifier_list);
+	err = device_add(&devfreq->dev);
+	if (err)
+		goto err_put_device;
 
 	mutex_unlock(&devfreq->lock);
 
@@ -716,10 +727,15 @@ err_init:
 	mutex_unlock(&devfreq_list_lock);
 
 	devfreq_remove_device(devfreq);
-	devfreq = NULL;
+	goto err_out;
+
+err_put_device:
+	mutex_unlock(&devfreq->lock);
+	put_device(&devfreq->dev);
+	goto err_out;
+
 err_dev:
-	if (devfreq)
-		kfree(devfreq);
+	kfree(devfreq);
 err_out:
 	return ERR_PTR(err);
 }
