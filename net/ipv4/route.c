@@ -2896,7 +2896,7 @@ int fib_dump_info_fnhe(struct sk_buff *skb, struct netlink_callback *cb,
 	struct net *net = sock_net(cb->skb->sk);
 	int nhsel, genid = fnhe_genid(net);
 
-	for (nhsel = 0; nhsel < fi->fib_nhs; nhsel++) {
+	for (nhsel = 0; nhsel < fib_info_num_path(fi); nhsel++) {
 		struct fib_nh_common *nhc = fib_info_nhc(fi, nhsel);
 		struct fnhe_hash_bucket *bucket;
 		int err;
