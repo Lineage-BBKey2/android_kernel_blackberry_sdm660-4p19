@@ -99,7 +99,7 @@
 
 /*
    Assumptions:
-   - if device has no dev->hard_header routine, it adds and removes ll header
+   - if device has no dev->header_ops->create callback, it adds and removes ll header
      inside itself. In this case ll header is invisible outside of device,
      but higher levels still should reserve dev->hard_header_len.
      Some devices are enough clever to reallocate skb, when header
@@ -111,36 +111,36 @@
 On receive:
 -----------
 
-Incoming, dev->hard_header!=NULL
+Incoming, dev_has_header(dev)
    mac_header -> ll header
    data       -> data
 
-Outgoing, dev->hard_header!=NULL
+Outgoing, dev_has_header(dev)
    mac_header -> ll header
    data       -> ll header
 
-Incoming, dev->hard_header==NULL
+Incoming, !dev_has_header(dev)
    mac_header -> UNKNOWN position. It is very likely, that it points to ll
 		 header.  PPP makes it, that is wrong, because introduce
 		 assymetry between rx and tx paths.
    data       -> data
 
-Outgoing, dev->hard_header==NULL
+Outgoing, !dev_has_header(dev)
    mac_header -> data. ll header is still not built!
    data       -> data
 
 Resume
-  If dev->hard_header==NULL we are unlikely to restore sensible ll header.
+  If !dev_has_header(dev) we are unlikely to restore sensible ll header.
 
 
 On transmit:
 ------------
 
-dev->hard_header != NULL
+dev_has_header(dev)
    mac_header -> ll header
    data       -> ll header
 
-dev->hard_header == NULL (ll header is added by device, we cannot control it)
+!dev_has_header(dev) (ll header is added by device, we cannot control it)
    mac_header -> data
    data       -> data
 
@@ -1990,7 +1990,7 @@ retry:
 	if (!skb) {
 		size_t reserved = LL_RESERVED_SPACE(dev);
 		int tlen = dev->needed_tailroom;
-		unsigned int hhlen = dev->header_ops ? dev->hard_header_len : 0;
+		unsigned int hhlen = dev_has_header(dev) ? dev->hard_header_len : 0;
 
 		rcu_read_unlock();
 		skb = sock_wmalloc(sk, len + reserved + tlen, 0, GFP_KERNEL);
@@ -2121,7 +2121,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	skb->dev = dev;
 
-	if (dev->header_ops) {
+	if (dev_has_header(dev)) {
 		/* The device has an explicit notion of ll header,
 		 * exported to higher levels.
 		 *
@@ -2252,7 +2252,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (!net_eq(dev_net(dev), sock_net(sk)))
 		goto drop;
 
-	if (dev->header_ops) {
+	if (dev_has_header(dev)) {
 		if (sk->sk_type != SOCK_DGRAM)
 			skb_push(skb, skb->data - skb_mac_header(skb));
 		else if (skb->pkt_type == PACKET_OUTGOING) {
