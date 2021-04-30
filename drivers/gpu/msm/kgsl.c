@@ -1125,24 +1125,28 @@ static int kgsl_close_device(struct kgsl_device *device)
 	int result = 0;
 
 	mutex_lock(&device->mutex);
-	device->open_count--;
-	if (device->open_count == 0) {
-
+	/* Keep the closing reference while the wait drops the mutex. */
+	if (device->open_count == 1) {
 		/*
 		 * Wait up to 1 second for the active count to go low
 		 * and then start complaining about it
 		 */
-		if (kgsl_active_count_wait(device, 0)) {
+		if (kgsl_active_count_wait(device, 0) &&
+		    device->open_count == 1) {
 			dev_err(device->dev,
 				"Waiting for the active count to become 0\n");
 
-			while (kgsl_active_count_wait(device, 0))
+			while (device->open_count == 1 &&
+			       kgsl_active_count_wait(device, 0))
 				dev_err(device->dev,
 					"Still waiting for the active count\n");
 		}
 
-		result = kgsl_pwrctrl_change_state(device, KGSL_STATE_INIT);
+		/* A new open may have acquired a reference during the wait. */
+		if (device->open_count == 1)
+			result = kgsl_pwrctrl_change_state(device, KGSL_STATE_INIT);
 	}
+	device->open_count--;
 	mutex_unlock(&device->mutex);
 	return result;
 
