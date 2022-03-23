@@ -191,10 +191,16 @@ static void update_counts(struct memlat_cpu_grp *cpu_grp)
 			common_evs[STALL_IDX].last_delta =
 				common_evs[CYC_IDX].last_delta;
 
-		cpu_data->freq = common_evs[CYC_IDX].last_delta / delta;
-		cpu_data->stall_pct = mult_frac(100,
-				common_evs[STALL_IDX].last_delta,
-				common_evs[CYC_IDX].last_delta);
+		if (delta != 0)
+			cpu_data->freq = common_evs[CYC_IDX].last_delta / delta;
+		else
+			cpu_data->freq = common_evs[CYC_IDX].last_delta;
+		if (common_evs[CYC_IDX].last_delta)
+			cpu_data->stall_pct = mult_frac(100,
+					common_evs[STALL_IDX].last_delta,
+					common_evs[CYC_IDX].last_delta);
+		else
+			cpu_data->stall_pct = 0;
 	}
 
 	for (i = 0; i < cpu_grp->num_mons; i++) {
@@ -241,7 +247,8 @@ static unsigned long get_cnt(struct memlat_hwmon *hw)
 			devstats->mem_count = 1;
 		}
 
-		if (mon->access_ev_id && mon->wb_ev_id)
+		if (mon->access_ev_id && mon->wb_ev_id &&
+		    mon->access_ev[mon_idx].last_delta)
 			devstats->wb_pct =
 				mult_frac(100, mon->wb_ev[mon_idx].last_delta,
 					  mon->access_ev[mon_idx].last_delta);
