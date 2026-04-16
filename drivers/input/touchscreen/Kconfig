@@ -859,7 +859,7 @@ config TOUCHSCREEN_WM97XX_ZYLONITE
 
 config SECURE_TOUCH_SYNAPTICS_DSX
 	bool "Secure Touch"
-	depends on TOUCHSCREEN_SYNAPTICS_DSX_I2C
+	depends on TOUCHSCREEN_SYNAPTICS_DSX_I2C_v21
 	help
 	  Say Y here to enable Secure Touch in supported driver.
 
@@ -1324,20 +1324,9 @@ config TOUCHSCREEN_ST
 
 source "drivers/input/touchscreen/st/Kconfig"
 
-config TOUCHSCREEN_SYNAPTICS_DSX
-	bool "Synaptics DSX Touchscreen Driver"
-	depends on I2C
-	default y
-	help
-	  Say Y here if you have a Synaptics Touchscreen.
-
-	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called synaptics_dsx.
-
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 source "drivers/input/touchscreen/synaptics_dsx_2.7/Kconfig"
+source "drivers/input/touchscreen/synaptics_dsx_bbry/Kconfig"
 
 config TOUCHSCREEN_SYNAPTICS_TCM
 	bool "Synaptics TCM Touchscreen Driver"
