@@ -27,7 +27,7 @@
 #include <linux/gameport.h>
 #include <linux/moduleparam.h>
 #include <linux/mutex.h>
-#include <linux/wakelock.h>
+#include <linux/module.h>
 /* MODIFIED-BEGIN by hongwei.tian, 2018-03-02,BUG-6049146*/
 #include <linux/timer.h>
 #include <linux/workqueue.h>

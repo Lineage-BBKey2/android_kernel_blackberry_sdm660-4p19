@@ -260,6 +260,12 @@ config MACH_BLACKBERRY_ATHENA
 	help
       Support for the BlackBerry Athena based on SDM660
 
+config MACH_BLACKBERRY_LUNA
+	bool "BlackBerry Mobile Luna"
+	depends on ARCH_BLACKBERRY_TCL_SDM660
+	help
+      Support for the BlackBerry Luna based on SDM636
+
 config ARCH_REALTEK
 	bool "Realtek Platforms"
 	help

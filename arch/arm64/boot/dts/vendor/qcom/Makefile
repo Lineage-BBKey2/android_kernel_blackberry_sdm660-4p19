@@ -359,7 +359,8 @@ sdm660-internal-codec-cdp.dtb \
         sdm636-usbc-audio-rcm.dtb
 else
 dtb-$(CONFIG_ARCH_SDM660) += \
-	sdm660-internal-codec-mtp-athena.dtb
+	sdm660-internal-codec-mtp-athena.dtb \
+	sdm636-internal-codec-mtp-luna.dtb
 endif
 endif
 
