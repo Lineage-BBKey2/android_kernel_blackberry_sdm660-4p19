@@ -716,6 +716,25 @@
 &i2c_6 {
 	nq@28 {
 		/delete-property/ qcom,nq-esepwr;
+		/*
+		 * Keep PM660 gpio4 (NFC CLK_REQ sense) in the default state so
+		 * device-core claims it before the NFC driver probes.
+		 */
+		pinctrl-names = "default", "nfc_active", "nfc_suspend";
+		pinctrl-0 = <&luna_nfc_clk_biasoff>;
+		pinctrl-1 = <&nfc_int_active &nfc_enable_active>;
+		pinctrl-2 = <&nfc_int_suspend &nfc_enable_suspend>;
+	};
+};
+
+&pm660_gpios {
+	luna_nfc_clk_biasoff: luna_nfc_clk_biasoff {
+		pins = "gpio4";
+		function = "normal";
+		bias-disable;
+		input-enable;
+		output-disable;
+		power-source = <1>;
 	};
 };
 
