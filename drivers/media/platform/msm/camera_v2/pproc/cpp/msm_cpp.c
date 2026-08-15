@@ -676,7 +676,7 @@ static int32_t msm_cpp_poll(void __iomem *cpp_base, u32 val)
 		CPP_LOW("Poll finished\n");
 	} else {
 		pr_err("Poll failed: expect: 0x%x\n", val);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 	}
 	return rc;
 }
@@ -702,7 +702,7 @@ static int32_t msm_cpp_poll_rx_empty(void __iomem *cpp_base)
 		CPP_LOW("Poll rx empty\n");
 	} else {
 		pr_warn_ratelimited("CPP: Poll rx empty timeout, continuing\n");
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 	}
 	return rc;
 }
@@ -1197,20 +1197,20 @@ static int32_t cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 
 	if (!fw_name_bin) {
 		pr_err("%s:%d] invalid fw name\n", __func__, __LINE__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto end;
 	}
 	pr_debug("%s:%d] FW file: %s\n", __func__, __LINE__, fw_name_bin);
 	if (cpp_dev->fw == NULL) {
 		pr_err("%s:%d] fw NULL\n", __func__, __LINE__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto end;
 	}
 
 	ptr_bin = (uint32_t *)cpp_dev->fw->data;
 	if (!ptr_bin) {
 		pr_err("%s:%d] Fw bin NULL\n", __func__, __LINE__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto end;
 	}
 
@@ -1585,7 +1585,7 @@ static int msm_cpp_buffer_ops(struct cpp_device *cpp_dev,
 	uint32_t buff_mgr_ops, uint32_t ids,
 	void *arg)
 {
-	int rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+	int rc = -EINVAL;
 
 	switch (buff_mgr_ops) {
 	case VIDIOC_MSM_BUF_MNGR_IOCTL_CMD: {
@@ -1673,7 +1673,7 @@ static int msm_cpp_notify_frame_done(struct cpp_device *cpp_dev,
 					0x0, &buff_mgr_info);
 				if (rc < 0) {
 					pr_err("error putting buffer\n");
-					rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+					rc = -EINVAL;
 				}
 			} else {
 				rc = msm_cpp_buffer_ops(cpp_dev,
@@ -1681,7 +1681,7 @@ static int msm_cpp_notify_frame_done(struct cpp_device *cpp_dev,
 					0x0, &buff_mgr_info);
 				if (rc < 0) {
 					pr_err("error putting buffer\n");
-					rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+					rc = -EINVAL;
 				}
 			}
 		}
@@ -1709,7 +1709,7 @@ static int msm_cpp_notify_frame_done(struct cpp_device *cpp_dev,
 					0x0, &buff_mgr_info);
 				if (rc < 0) {
 					pr_err("error putting buffer\n");
-					rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+					rc = -EINVAL;
 				}
 			} else {
 				rc = msm_cpp_buffer_ops(cpp_dev,
@@ -1717,7 +1717,7 @@ static int msm_cpp_notify_frame_done(struct cpp_device *cpp_dev,
 					0x0, &buff_mgr_info);
 				if (rc < 0) {
 					pr_err("error putting buffer\n");
-					rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+					rc = -EINVAL;
 				}
 			}
 		}
@@ -2362,7 +2362,7 @@ static int32_t msm_cpp_set_group_buffer_duplicate(struct cpp_device *cpp_dev,
 		if (!set_group_buffer_len) {
 			pr_err("%s: invalid set group buffer cmd len %d\n",
 				 __func__, set_group_buffer_len);
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			break;
 		}
 
@@ -2416,7 +2416,7 @@ static int32_t msm_cpp_set_group_buffer_duplicate(struct cpp_device *cpp_dev,
 			if (!out_phyaddr1) {
 				pr_err("%s: error getting o/p phy addr\n",
 					__func__);
-				rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+				rc = -EINVAL;
 				break;
 			}
 			distance = out_phyaddr1 - out_phyaddr0;
@@ -2491,7 +2491,7 @@ static int32_t msm_cpp_set_group_buffer(struct cpp_device *cpp_dev,
 
 	if (new_frame->duplicate_output) {
 		pr_err("cannot support duplication enable\n");
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto exit;
 	}
 
@@ -2540,7 +2540,7 @@ static int32_t msm_cpp_set_group_buffer(struct cpp_device *cpp_dev,
 		if (!out_phyaddr1) {
 			pr_err("%s: error getting o/p phy addr\n",
 				__func__);
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			goto free_and_exit;
 		}
 		distance = out_phyaddr1 - out_phyaddr0;
@@ -2674,7 +2674,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 		(new_frame->input_buffer_info.identity & 0xFFFF), &in_fd);
 	if (!in_phyaddr) {
 		pr_err("%s: error gettting input physical address\n", __func__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto frame_msg_err;
 	}
 
@@ -2730,7 +2730,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 			if (!num_output_bufs) {
 				pr_err("%s: error getting buffer %d\n",
 					__func__, num_output_bufs);
-				rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+				rc = -EINVAL;
 				goto phyaddr_err;
 			}
 		}
@@ -2743,7 +2743,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 		if (!out_phyaddr0) {
 			pr_err("%s: error gettting output physical address\n",
 				__func__);
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			goto phyaddr_err;
 		}
 	}
@@ -2797,7 +2797,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 			&new_frame->duplicate_buffer_info.fd);
 		if (!out_phyaddr1) {
 			pr_err("error gettting output physical address\n");
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			msm_cpp_buffer_ops(cpp_dev, VIDIOC_MSM_BUF_MNGR_PUT_BUF,
 				0x0, &dup_buff_mgr_info);
 			goto phyaddr_err;
@@ -2816,7 +2816,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 			&new_frame->tnr_scratch_buffer_info[0].fd);
 		if (!tnr_scratch_buffer0) {
 			pr_err("error getting scratch buffer physical address\n");
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			goto phyaddr_err;
 		}
 
@@ -2827,7 +2827,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 			&new_frame->tnr_scratch_buffer_info[1].fd);
 		if (!tnr_scratch_buffer1) {
 			pr_err("error getting scratch buffer physical address\n");
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			goto phyaddr_err;
 		}
 	} else {
@@ -2866,7 +2866,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 	rc = msm_cpp_send_frame_to_hardware(cpp_dev, frame_qcmd);
 	if (rc < 0) {
 		pr_err("%s: error cannot send frame to hardware\n", __func__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto qcmd_err;
 	}
 
@@ -2901,7 +2901,7 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 	frame = msm_cpp_get_frame(ioctl_ptr);
 	if (!frame) {
 		pr_err("%s: Error allocating frame\n", __func__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 	} else {
 		if ((frame->msg_len == 0) ||
 			(frame->msg_len > MSM_CPP_MAX_FRAME_LENGTH)) {
@@ -3560,7 +3560,7 @@ STREAM_BUFF_END:
 		}
 		if (rc < 0) {
 			pr_err("error in buf done\n");
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 		}
 
 		break;
@@ -3573,7 +3573,7 @@ STREAM_BUFF_END:
 		if (ioctl_ptr->ioctl_ptr == NULL ||
 			(ioctl_ptr->len !=
 			sizeof(struct msm_cpp_frame_info_t))) {
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 			break;
 		}
 
@@ -3626,7 +3626,7 @@ STREAM_BUFF_END:
 
 			if (ioctl_ptr->len !=
 				sizeof(struct msm_camera_smmu_attach_type)) {
-				rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+				rc = -EINVAL;
 				break;
 			}
 
@@ -3654,14 +3654,14 @@ STREAM_BUFF_END:
 			if (rc < 0) {
 				pr_err("%s:%diommu_attach_device failed\n",
 					__func__, __LINE__);
-				rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+				rc = -EINVAL;
 				break;
 			}
 			cpp_dev->iommu_state = CPP_IOMMU_STATE_ATTACHED;
 		} else {
 			pr_err("%s:%d IOMMMU attach triggered in invalid state\n",
 				__func__, __LINE__);
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 		}
 		break;
 	}
@@ -3672,7 +3672,7 @@ STREAM_BUFF_END:
 
 			if (ioctl_ptr->len !=
 				sizeof(struct msm_camera_smmu_attach_type)) {
-				rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+				rc = -EINVAL;
 				break;
 			}
 
@@ -3695,14 +3695,14 @@ STREAM_BUFF_END:
 			if (rc < 0) {
 				pr_err("%s:%diommu detach failed\n", __func__,
 					__LINE__);
-				rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+				rc = -EINVAL;
 				break;
 			}
 			cpp_dev->iommu_state = CPP_IOMMU_STATE_DETACHED;
 		} else {
 			pr_err("%s:%d IOMMMU attach triggered in invalid state\n",
 				__func__, __LINE__);
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 		}
 		break;
 	}
@@ -4085,7 +4085,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 		} else {
 			pr_err("%s: Error getting frame\n", __func__);
 			mutex_unlock(&cpp_dev->mutex);
-			rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+			rc = -EINVAL;
 		}
 
 		kp_ioctl.trans_code = rc;
@@ -4377,7 +4377,6 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 		break;
 	case MSM_SD_NOTIFY_FREEZE:
 		break;
-		pr_info("CPP: GET_INST_INFO32 called\n");
 	case MSM_SD_UNNOTIFY_FREEZE:
 		break;
 	default:
@@ -4415,7 +4414,7 @@ static  int msm_cpp_update_gdscr_status(struct cpp_device *cpp_dev,
 
 	if (!cpp_dev) {
 		pr_err("%s: cpp device invalid\n", __func__);
-		rc = 0; /* tolerate timeout on 4.19 shared IOMMU domain */
+		rc = -EINVAL;
 		goto end;
 	}
 	msm_cpp_reg_idx = msm_cpp_get_regulator_index(cpp_dev, "vdd");
