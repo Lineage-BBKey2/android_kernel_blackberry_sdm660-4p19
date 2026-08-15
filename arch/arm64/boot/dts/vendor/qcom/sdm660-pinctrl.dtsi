@@ -1415,9 +1415,38 @@
 		};
 
 		cam_sensor_mclk1_active: cam_sensor_mclk1_active {
-			/* MCLK1 */
+			/* MCLK1 - athena KEY2 hardware uses gpio35 */
 			mux {
 				/* CLK */
+				pins = "gpio35";
+				function = "cam_mclk";
+			};
+
+			config {
+				pins = "gpio35";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_mclk1_suspend: cam_sensor_mclk1_suspend {
+			/* MCLK1 - athena KEY2 hardware uses gpio35 */
+			mux {
+				/* CLK */
+				pins = "gpio35";
+				function = "cam_mclk";
+			};
+
+			config {
+				pins = "gpio35";
+				bias-pull-down; /* PULL DOWN */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_mclk1_active_luna: cam_sensor_mclk1_active_luna {
+			/* MCLK1 - luna KEY2 LE hardware uses gpio33 */
+			mux {
 				pins = "gpio33";
 				function = "cam_mclk";
 			};
@@ -1429,10 +1458,9 @@
 			};
 		};
 
-		cam_sensor_mclk1_suspend: cam_sensor_mclk1_suspend {
-			/* MCLK1 */
+		cam_sensor_mclk1_suspend_luna: cam_sensor_mclk1_suspend_luna {
+			/* MCLK1 - luna KEY2 LE hardware uses gpio33 */
 			mux {
-				/* CLK */
 				pins = "gpio33";
 				function = "cam_mclk";
 			};
@@ -1530,28 +1558,28 @@
 		};
 
 		cam_sensor_front_active: cam_sensor_front_active {
-			/* RESET  VANA*/
+			/* RESET  VANA - athena KEY2 hardware */
 			mux {
-				pins = "gpio47", "gpio44";
+				pins = "gpio52", "gpio51";
 				function = "gpio";
 			};
 
 			config {
-				pins = "gpio47", "gpio44";
+				pins = "gpio52", "gpio51";
 				bias-disable; /* No PULL */
 				drive-strength = <2>; /* 2 MA */
 			};
 		};
 
 		cam_sensor_front_suspend: cam_sensor_front_suspend {
-			/* RESET */
+			/* RESET - athena KEY2 hardware */
 			mux {
-				pins = "gpio47";
+				pins = "gpio52";
 				function = "gpio";
 			};
 
 			config {
-				pins = "gpio47";
+				pins = "gpio52";
 				bias-disable; /* No PULL */
 				drive-strength = <2>; /* 2 MA */
 			};

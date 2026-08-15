@@ -188,9 +188,9 @@
 		qcom,cam-vreg-op-mode = <105000>;
 		qcom,gpio-no-mux = <0>;
 		pinctrl-names = "cam_default", "cam_suspend";
-		pinctrl-0 = <&cam_sensor_mclk1_active
+		pinctrl-0 = <&cam_sensor_mclk1_active_luna
 				 &cam_sensor_front_luna_active>;
-		pinctrl-1 = <&cam_sensor_mclk1_suspend
+		pinctrl-1 = <&cam_sensor_mclk1_suspend_luna
 				 &cam_sensor_front_luna_suspend>;
 		gpios = <&tlmm 33 0>,
 			<&tlmm 52 0>,
@@ -312,9 +312,9 @@
 		qcom,cam-vreg-op-mode = <105000>;
 		qcom,gpio-no-mux = <0>;
 		pinctrl-names = "cam_default", "cam_suspend";
-		pinctrl-0 = <&cam_sensor_mclk1_active
+		pinctrl-0 = <&cam_sensor_mclk1_active_luna
 				 &cam_sensor_front_luna_active>;
-		pinctrl-1 = <&cam_sensor_mclk1_suspend
+		pinctrl-1 = <&cam_sensor_mclk1_suspend_luna
 				 &cam_sensor_front_luna_suspend>;
 		gpios = <&tlmm 33 0>,
 			<&tlmm 52 0>,
