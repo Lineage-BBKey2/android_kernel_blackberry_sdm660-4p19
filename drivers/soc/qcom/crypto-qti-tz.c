@@ -54,17 +54,24 @@ int crypto_qti_program_key(struct crypto_vops_qti_entry *ice_entry,
 	memcpy(tzbuf, key_new.bytes, key->size);
 	dmac_flush_range(tzbuf, tzbuf + key->size);
 
-	smc_id = TZ_ES_CONFIG_SET_ICE_KEY_CE_TYPE_ID;
-	desc.arginfo = TZ_ES_CONFIG_SET_ICE_KEY_CE_TYPE_PARAM_ID;
+	/*
+	 * BlackBerry's secure firmware uses the legacy Qualcomm PFK ICE
+	 * interface: a 32-byte XTS key and a separate 32-byte XTS salt.
+	 */
+	if (key->is_hw_wrapped || key->size != 64) {
+		err = -EOPNOTSUPP;
+	}
+
+	smc_id = BBRY_TZ_ES_SET_ICE_KEY_ID;
+	desc.arginfo = BBRY_TZ_ES_SET_ICE_KEY_PARAM_ID;
 	desc.args[0] = slot;
 	desc.args[1] = shm.paddr;
-	desc.args[2] = key->size;
-	desc.args[3] = ICE_CIPHER_MODE_XTS_256;
-	desc.args[4] = data_unit_mask;
-	desc.args[5] = storage_type;
+	desc.args[2] = 32;
+	desc.args[3] = shm.paddr + 32;
+	desc.args[4] = 32;
 
+	err = scm_call2(smc_id, &desc);
 
-	err = scm_call2_noretry(smc_id, &desc);
 	if (err)
 		pr_err("%s:SCM call Error: 0x%x slot %d\n",
 				__func__, err, slot);
@@ -81,13 +88,12 @@ int crypto_qti_invalidate_key(
 	uint32_t smc_id = 0;
 	struct scm_desc desc = {0};
 
-	smc_id = TZ_ES_INVALIDATE_ICE_KEY_CE_TYPE_ID;
+	smc_id = BBRY_TZ_ES_INVALIDATE_ICE_KEY_ID;
 
-	desc.arginfo = TZ_ES_INVALIDATE_ICE_KEY_CE_TYPE_PARAM_ID;
+	desc.arginfo = BBRY_TZ_ES_INVALIDATE_ICE_KEY_PARAM_ID;
 	desc.args[0] = slot;
-	desc.args[1] = storage_type;
 
-	err = scm_call2_noretry(smc_id, &desc);
+	err = scm_call2(smc_id, &desc);
 	if (err)
 		pr_err("%s:SCM call Error: 0x%x\n", __func__, err);
 	return err;

@@ -31,6 +31,17 @@
 #define MINIMUM_DUN_SIZE 512
 #define MAXIMUM_DUN_SIZE 65536
 
+/*
+ * BlackBerry's legacy PFK ICE firmware reserves hardware keyslots
+ * 0 and 1 for FDE.
+ */
+#define BBRY_ICE_RESERVED_SLOTS 2
+
+static inline unsigned int bbry_ice_hw_slot(unsigned int slot)
+{
+	return slot + BBRY_ICE_RESERVED_SLOTS;
+}
+
 static struct cqhci_host_crypto_variant_ops cqhci_crypto_qti_variant_ops = {
 	.host_init_crypto = cqhci_crypto_qti_init_crypto,
 	.enable = cqhci_crypto_qti_enable,
@@ -128,7 +139,7 @@ static int cqhci_crypto_qti_keyslot_program(struct keyslot_manager *ksm,
 	pm_runtime_get_sync(&host->mmc->card->dev);
 
 	if (!cqhci_is_crypto_enabled(host) ||
-	    !cqhci_keyslot_valid(host, slot) ||
+	    !cqhci_keyslot_valid(host, bbry_ice_hw_slot(slot)) ||
 	    !ice_cap_idx_valid(host, crypto_alg_id)) {
 		pm_runtime_put_sync(&host->mmc->card->dev);
 		return -EINVAL;
@@ -143,7 +154,8 @@ static int cqhci_crypto_qti_keyslot_program(struct keyslot_manager *ksm,
 	}
 
 	err = crypto_qti_keyslot_program(host->crypto_vops->priv, key,
-					 slot, data_unit_mask, crypto_alg_id);
+			                 bbry_ice_hw_slot(slot),
+			                 data_unit_mask, crypto_alg_id);
 	if (err)
 		pr_err("%s: failed with error %d\n", __func__, err);
 
@@ -178,12 +190,13 @@ static int cqhci_crypto_qti_keyslot_evict(struct keyslot_manager *ksm,
 	pm_runtime_get_sync(&host->mmc->card->dev);
 
 	if (!cqhci_is_crypto_enabled(host) ||
-	    !cqhci_keyslot_valid(host, slot)) {
+	    !cqhci_keyslot_valid(host, bbry_ice_hw_slot(slot))) {
 		pm_runtime_put_sync(&host->mmc->card->dev);
 		return -EINVAL;
 	}
 
-	err = crypto_qti_keyslot_evict(host->crypto_vops->priv, slot);
+	err = crypto_qti_keyslot_evict(host->crypto_vops->priv,
+				       bbry_ice_hw_slot(slot));
 	if (err)
 		pr_err("%s: failed with error %d\n", __func__, err);
 
@@ -283,8 +296,13 @@ int cqhci_host_init_crypto_qti_spec(struct cqhci_host *host,
 				host->crypto_cap_array[cap_idx].sdus_mask * 512;
 	}
 
+	if (cqhci_num_keyslots(host) <= BBRY_ICE_RESERVED_SLOTS) {
+		err = -ENODEV;
+		goto out;
+	}
+
 	host->ksm = keyslot_manager_create(host->mmc->parent,
-					   cqhci_num_keyslots(host), ksm_ops,
+					   cqhci_num_keyslots(host) - BBRY_ICE_RESERVED_SLOTS, ksm_ops,
 					   BLK_CRYPTO_FEATURE_STANDARD_KEYS |
 					   BLK_CRYPTO_FEATURE_WRAPPED_KEYS,
 					   crypto_modes_supported, host);
@@ -425,8 +443,9 @@ int cqhci_crypto_qti_prep_desc(struct cqhci_host *host, struct mmc_request *mrq,
 		else
 			*ice_ctx = DATA_UNIT_NUM(bc->bc_dun[0]);
 
-		*ice_ctx = *ice_ctx | CRYPTO_CONFIG_INDEX(bc->bc_keyslot) |
-			    CRYPTO_ENABLE(true);
+		*ice_ctx = *ice_ctx |
+			   CRYPTO_CONFIG_INDEX(bbry_ice_hw_slot(bc->bc_keyslot)) |
+			   CRYPTO_ENABLE(true);
 	}
 	return 0;
 }
