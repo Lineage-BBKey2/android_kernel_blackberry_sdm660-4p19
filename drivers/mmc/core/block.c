@@ -516,9 +516,13 @@ static int __mmc_blk_ioctl_cmd(struct mmc_card *card, struct mmc_blk_data *md,
 	struct scatterlist sg;
 	int err;
 	unsigned int target_part;
+	bool is_rpmb;
 
 	if (!card || !md || !idata)
 		return -EINVAL;
+
+	is_rpmb = idata->rpmb ||
+		!!(md->area_type & MMC_BLK_DATA_AREA_RPMB);
 
 	/*
 	 * The RPMB accesses comes in from the character device, so we
@@ -586,7 +590,7 @@ static int __mmc_blk_ioctl_cmd(struct mmc_card *card, struct mmc_blk_data *md,
 			return err;
 	}
 
-	if (idata->rpmb) {
+	if (is_rpmb) {
 		sbc.opcode = MMC_SET_BLOCK_COUNT;
 		/*
 		 * We don't do any blockcount validation because the max size
@@ -660,7 +664,7 @@ static int __mmc_blk_ioctl_cmd(struct mmc_card *card, struct mmc_blk_data *md,
 	if (idata->ic.postsleep_min_us)
 		usleep_range(idata->ic.postsleep_min_us, idata->ic.postsleep_max_us);
 
-	if (idata->rpmb || (cmd.flags & MMC_RSP_R1B) == MMC_RSP_R1B) {
+	if (is_rpmb || (cmd.flags & MMC_RSP_R1B) == MMC_RSP_R1B) {
 		/*
 		 * Ensure RPMB/R1B command has completed by polling CMD13
 		 * "Send Status".
@@ -798,6 +802,93 @@ cmd_err:
 	return ioc_err ? ioc_err : err;
 }
 
+/*
+ * Legacy Qualcomm RPMB ABI used by older qseecomd/librpmb.
+ *
+ * MMC_IOC_RPMB_CMD contains a fixed array of up to three mmc_ioc_cmd
+ * structures. Execute them as one RPMB driver operation so the sequence
+ * remains serialized and the RPMB partition remains selected until the
+ * operation completes.
+ */
+static int mmc_blk_ioctl_rpmb_cmd(struct mmc_blk_data *md,
+		struct mmc_ioc_rpmb __user *user)
+{
+	struct mmc_blk_ioc_data *idata[MMC_IOC_MAX_RPMB_CMD] = {};
+	struct mmc_card *card;
+	struct mmc_queue *mq;
+	struct request *req;
+	int i;
+	int num_of_cmds = 0;
+	int err = 0;
+	int ioc_err = 0;
+
+	if (!(md->area_type & MMC_BLK_DATA_AREA_RPMB))
+		return -EINVAL;
+
+	for (i = 0; i < MMC_IOC_MAX_RPMB_CMD; i++) {
+		idata[i] = mmc_blk_ioctl_copy_from_user(&user->cmds[i]);
+		if (IS_ERR(idata[i])) {
+			err = PTR_ERR(idata[i]);
+			idata[i] = NULL;
+			goto out_free;
+		}
+
+		/*
+		 * This request comes from the legacy RPMB block device,
+		 * not from the newer RPMB character device.
+		 */
+		idata[i]->rpmb = NULL;
+
+		if (!idata[i]->ic.opcode)
+			break;
+
+		num_of_cmds++;
+	}
+
+	if (!num_of_cmds)
+		goto out_free;
+
+	card = md->queue.card;
+	if (IS_ERR_OR_NULL(card)) {
+		err = card ? PTR_ERR(card) : -ENODEV;
+		goto out_free;
+	}
+
+	mq = &md->queue;
+
+	req = blk_get_request(mq->queue,
+		idata[0]->ic.write_flag ? REQ_OP_DRV_OUT : REQ_OP_DRV_IN, 0);
+	if (IS_ERR(req)) {
+		err = PTR_ERR(req);
+		goto out_free;
+	}
+
+	req_to_mmc_queue_req(req)->drv_op = MMC_DRV_OP_IOCTL_RPMB;
+	req_to_mmc_queue_req(req)->drv_op_result = -EIO;
+	req_to_mmc_queue_req(req)->drv_op_data = idata;
+	req_to_mmc_queue_req(req)->ioc_count = num_of_cmds;
+
+	blk_execute_rq(mq->queue, NULL, req, 0);
+
+	ioc_err = req_to_mmc_queue_req(req)->drv_op_result;
+
+	for (i = 0; i < num_of_cmds && !err; i++)
+		err = mmc_blk_ioctl_copy_to_user(&user->cmds[i], idata[i]);
+
+	blk_put_request(req);
+
+out_free:
+	for (i = 0; i < MMC_IOC_MAX_RPMB_CMD; i++) {
+		if (!idata[i])
+			continue;
+
+		kfree(idata[i]->buf);
+		kfree(idata[i]);
+	}
+
+	return ioc_err ? ioc_err : err;
+}
+
 static int mmc_blk_check_blkdev(struct block_device *bdev)
 {
 	/*
@@ -827,6 +918,20 @@ static int mmc_blk_ioctl(struct block_device *bdev, fmode_t mode,
 		ret = mmc_blk_ioctl_cmd(md,
 					(struct mmc_ioc_cmd __user *)arg,
 					NULL);
+		mmc_blk_put(md);
+		return ret;
+	case MMC_IOC_RPMB_CMD:
+		ret = mmc_blk_check_blkdev(bdev);
+		if (ret)
+			return ret;
+
+		md = mmc_blk_get(bdev->bd_disk);
+		if (!md)
+			return -EINVAL;
+
+		ret = mmc_blk_ioctl_rpmb_cmd(md,
+				(struct mmc_ioc_rpmb __user *)arg);
+
 		mmc_blk_put(md);
 		return ret;
 	case MMC_IOC_MULTI_CMD:
@@ -2287,6 +2392,17 @@ enum mmc_issued mmc_blk_mq_issue_rq(struct mmc_queue *mq, struct request *req)
 	int ret;
 	int err;
 
+	/*
+	 * Legacy Qualcomm userspace requires RPMB to be exposed as a block
+	 * device for ioctls, but RPMB must not allow ordinary block I/O.
+	 * Permit driver-specific ioctl requests while rejecting normal reads,
+	 * writes, flushes, discards, and secure erases.
+	 */
+	if ((md->area_type & MMC_BLK_DATA_AREA_RPMB) &&
+	    req_op(req) != REQ_OP_DRV_IN &&
+	    req_op(req) != REQ_OP_DRV_OUT)
+		return MMC_REQ_FAILED_TO_START;
+
 	ret = mmc_blk_part_switch(card, md->part_type);
 	if (ret) {
 		err = mmc_blk_reset(md, card->host, MMC_BLK_PARTSWITCH);
@@ -2708,10 +2824,20 @@ static int mmc_blk_alloc_parts(struct mmc_card *card, struct mmc_blk_data *md)
 	for (idx = 0; idx < card->nr_parts; idx++) {
 		if (card->part[idx].area_type & MMC_BLK_DATA_AREA_RPMB) {
 			/*
-			 * RPMB partitions does not provide block access, they
-			 * are only accessed using ioctl():s. Thus create
-			 * special RPMB block devices that do not have a
-			 * backing block queue for these.
+			 * Preserve the legacy RPMB block device required by
+			 * older Qualcomm qseecomd/librpmb userspace.
+			 */
+			ret = mmc_blk_alloc_part(card, md,
+				card->part[idx].part_cfg,
+				card->part[idx].size >> 9,
+				card->part[idx].force_ro,
+				card->part[idx].name,
+				card->part[idx].area_type);
+			if (ret)
+				return ret;
+
+			/*
+			 * Also retain the newer RPMB character-device ABI.
 			 */
 			ret = mmc_blk_alloc_rpmb_part(card, md,
 				card->part[idx].part_cfg,
