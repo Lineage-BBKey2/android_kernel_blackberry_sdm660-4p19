@@ -21,6 +21,7 @@
 #include "adreno_a5xx.h"
 #include "adreno_a6xx.h"
 #include "adreno_compat.h"
+#include "adreno_dispatch.h"
 #include "adreno_iommu.h"
 #include "adreno_llc.h"
 #include "adreno_trace.h"
@@ -2712,6 +2713,20 @@ static int adreno_prop_gaming_bin(struct kgsl_device *device,
 	return -EINVAL;
 }
 
+static int adreno_prop_ib_timeout(struct kgsl_device *device,
+		struct kgsl_device_getproperty *param)
+{
+	unsigned int ib_timeout = adreno_drawobj_timeout;
+
+	if (ib_timeout == 0)
+		return -EINVAL;
+
+	if (param->sizebytes != sizeof(ib_timeout))
+		return -EINVAL;
+
+	return copy_prop(param, &ib_timeout, sizeof(ib_timeout));
+}
+
 static int adreno_prop_u32(struct kgsl_device *device,
 		struct kgsl_device_getproperty *param)
 {
@@ -2743,6 +2758,7 @@ static const struct {
 	{ KGSL_PROP_DEVICE_SHADOW, adreno_prop_device_shadow },
 	{ KGSL_PROP_DEVICE_QDSS_STM, adreno_prop_device_qdss_stm },
 	{ KGSL_PROP_DEVICE_QTIMER, adreno_prop_device_qtimer },
+	{ KGSL_PROP_IB_TIMEOUT, adreno_prop_ib_timeout },
 	{ KGSL_PROP_MMU_ENABLE, adreno_prop_s32 },
 	{ KGSL_PROP_INTERRUPT_WAITS, adreno_prop_s32 },
 	{ KGSL_PROP_UCHE_GMEM_VADDR, adreno_prop_uche_gmem_addr },
