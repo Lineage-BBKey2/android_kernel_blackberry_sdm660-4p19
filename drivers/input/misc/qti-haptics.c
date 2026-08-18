@@ -173,6 +173,7 @@ struct qti_hap_effect {
 	int			pattern_length;
 	u16			play_rate_us;
 	u16			vmax_mv;
+	int			direct_duration_us;
 	u8			wf_repeat_n;
 	u8			wf_s_repeat_n;
 	u8			brake[HAP_BRAKE_PATTERN_MAX];
@@ -196,7 +197,9 @@ struct qti_hap_config {
 	enum lra_auto_res_mode	lra_auto_res_mode;
 	u16			vmax_mv;
 	u16			play_rate_us;
+	u8			brake[HAP_BRAKE_PATTERN_MAX];
 	bool			lra_allow_variable_play_rate;
+	bool			brake_en;
 };
 
 struct qti_hap_chip {
@@ -620,6 +623,21 @@ static int qti_haptics_load_constant_waveform(struct qti_hap_chip *chip)
 	rc = qti_haptics_config_play_rate_us(chip, config->play_rate_us);
 	if (rc < 0)
 		return rc;
+
+	/*
+	 * The legacy qpnp-haptic driver applied the top-level brake setting
+	 * to direct/constant effects. Keep that behaviour for ERM devices so
+	 * short pulses stop cleanly instead of running together mechanically.
+	 */
+	if (config->brake_en) {
+		rc = qti_haptics_config_brake(chip, config->brake);
+		if (rc < 0)
+			return rc;
+	} else {
+		rc = qti_haptics_brake_enable(chip, false);
+		if (rc < 0)
+			return rc;
+	}
 	/*
 	 * Using VMAX waveform source if playing length is >= 20ms,
 	 * otherwise using buffer waveform source and calculate the
@@ -720,6 +738,8 @@ static int qti_haptics_load_predefined_effect(struct qti_hap_chip *chip,
 			return rc;
 
 		play->playing_pattern = true;
+	} else {
+		play->playing_pattern = false;
 	}
 
 	return 0;
@@ -826,6 +846,11 @@ static inline void get_play_length(struct qti_hap_play_info *play,
 	if (effect->wf_src == EXT_WF_PWM ||
 			effect->wf_src == EXT_WF_AUDIO) {
 		*length_us = 0;
+		return;
+	}
+
+	if (effect->wf_src == INT_WF_VMAX) {
+		*length_us = effect->direct_duration_us;
 		return;
 	}
 
@@ -1006,7 +1031,24 @@ static int qti_haptics_playback(struct input_dev *dev, int effect_id, int val)
 static int qti_haptics_erase(struct input_dev *dev, int effect_id)
 {
 	struct qti_hap_chip *chip = input_get_drvdata(dev);
-	int delay_us, rc = 0;
+	struct qti_hap_config *config = &chip->config;
+	struct qti_hap_effect *effect = chip->play.effect;
+	u8 *brake = NULL;
+	int brake_length = 0, delay_us, i, play_rate_us = 0, rc = 0;
+
+	/*
+	 * input_ff_erase() stops playback before calling ->erase().  Keep the
+	 * configured brake active long enough to stop a direct-driven ERM pulse.
+	 */
+	if (!chip->play.playing_pattern) {
+		if (effect && effect->brake_en) {
+			brake = effect->brake;
+			play_rate_us = effect->play_rate_us;
+		} else if (!effect && config->brake_en) {
+			brake = config->brake;
+			play_rate_us = config->play_rate_us;
+		}
+	}
 
 	if (chip->vdd_supply && chip->vdd_enabled) {
 		rc = regulator_disable(chip->vdd_supply);
@@ -1018,16 +1060,22 @@ static int qti_haptics_erase(struct input_dev *dev, int effect_id)
 		chip->vdd_enabled = false;
 	}
 
-	rc = qti_haptics_clear_settings(chip);
-	if (rc < 0) {
-		dev_err(chip->dev, "clear setting failed, rc=%d\n", rc);
-		return rc;
-	}
+	if (brake) {
+		for (i = HAP_BRAKE_PATTERN_MAX - 1; i >= 0; i--)
+			if (brake[i] != 0)
+				break;
 
-	if (chip->play.effect)
-		delay_us = chip->play.effect->play_rate_us;
-	else
-		delay_us = chip->config.play_rate_us;
+		brake_length = i + 1;
+		delay_us = max(brake_length, 1) * play_rate_us;
+	} else {
+		rc = qti_haptics_clear_settings(chip);
+		if (rc < 0) {
+			dev_err(chip->dev, "clear setting failed, rc=%d\n", rc);
+			return rc;
+		}
+
+		delay_us = effect ? effect->play_rate_us : config->play_rate_us;
+	}
 
 	delay_us += HAP_DISABLE_DELAY_USEC;
 	hrtimer_start(&chip->hap_disable_timer,
@@ -1265,15 +1313,34 @@ static int qti_haptics_parse_dt_per_effect(struct qti_hap_chip *chip)
 		}
 
 		effect->wf_src = INT_WF_BUFFER;
-		if (of_property_read_bool(child_node, "qcom,wf-line-in-pwm"))
+		if (of_find_property(child_node,
+				"qcom,wf-direct-duration-us", NULL)) {
+			rc = of_property_read_u32(child_node,
+					"qcom,wf-direct-duration-us", &tmp);
+			if (rc < 0 || tmp <= 0) {
+				dev_err(chip->dev,
+					"Invalid qcom,wf-direct-duration-us, rc=%d\n",
+					rc);
+				return rc < 0 ? rc : -EINVAL;
+			}
+
+			effect->direct_duration_us = tmp;
+			effect->wf_src = INT_WF_VMAX;
+		}
+
+		if (of_property_read_bool(child_node, "qcom,wf-line-in-pwm")) {
+			if (effect->wf_src == INT_WF_VMAX)
+				return -EINVAL;
 			effect->wf_src = EXT_WF_PWM;
-		if (of_property_read_bool(child_node, "qcom,wf-line-in-audio"))
+		}
+		if (of_property_read_bool(child_node, "qcom,wf-line-in-audio")) {
+			if (effect->wf_src == INT_WF_VMAX)
+				return -EINVAL;
 			effect->wf_src = EXT_WF_AUDIO;
+		}
 
 		/*
-		 * Ignore wf-pattern configuration iff it's
-		 * supposed to play waveform/signal from LINE-IN
-		 * pin
+		 * Ignore wf-pattern for direct drive and LINE-IN sources.
 		 */
 		if (effect->wf_src != INT_WF_BUFFER)
 			continue;
@@ -1457,6 +1524,26 @@ static int qti_haptics_parse_dt(struct qti_hap_chip *chip)
 	if (!rc)
 		config->play_rate_us = (tmp >= HAP_PLAY_RATE_US_MAX) ?
 			HAP_PLAY_RATE_US_MAX : tmp;
+
+	config->brake_en = of_property_read_bool(node, "qcom,en-brake");
+	tmp = of_property_count_elems_of_size(node, "qcom,brake-pattern",
+			sizeof(u8));
+	if (config->brake_en && tmp > 0) {
+		if (tmp != HAP_BRAKE_PATTERN_MAX) {
+			dev_err(chip->dev,
+				"qcom,brake-pattern must contain %d bytes\n",
+				HAP_BRAKE_PATTERN_MAX);
+			return -EINVAL;
+		}
+
+		rc = of_property_read_u8_array(node, "qcom,brake-pattern",
+				config->brake, HAP_BRAKE_PATTERN_MAX);
+		if (rc < 0) {
+			dev_err(chip->dev,
+				"Failed to get qcom,brake-pattern, rc=%d\n", rc);
+			return rc;
+		}
+	}
 
 	if (of_find_property(node, "vdd-supply", NULL)) {
 		chip->vdd_supply = devm_regulator_get(chip->dev, "vdd");

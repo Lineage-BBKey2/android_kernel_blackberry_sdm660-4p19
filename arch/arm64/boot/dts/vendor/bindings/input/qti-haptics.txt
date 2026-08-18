@@ -59,6 +59,19 @@ Properties:
 		specified in the LRA actuator datasheet. Allowed values are:
 		0 to 20475. If this is not specified, 5715us play rate is used.
 
+- qcom,en-brake
+  Usage:      optional
+  Value type: <empty>
+  Definition: Enables electrical braking after constant effects. This is
+		useful for ERM actuators whose mechanical inertia can otherwise make
+		closely spaced pulses run together.
+
+- qcom,brake-pattern
+  Usage:      optional
+  Value type: <prop-encoded-array>
+  Definition: Four-byte brake pattern used when qcom,en-brake is present.
+		Each byte is limited to the low two bits.
+
 - vdd-supply
   Usage:      optional
   Value type: <phandle>
@@ -109,6 +122,13 @@ waveforms/effects:
 		 [6]: overdrive, 0 -- 1x drive; 1 -- 2x drive
 		 [5:1]: waveform amplitude
 		 [0]: reserved.
+
+- qcom,wf-direct-duration-us
+  Usage:      optional
+  Value type: <u32>
+  Definition: Plays this predefined effect from the VMAX/direct source for the
+		specified duration in microseconds. qcom,wf-pattern and waveform
+		repeat properties are ignored. Intended for single-pulse ERM effects.
 
 - qcom,wf-vmax-mv
   Usage:      optional

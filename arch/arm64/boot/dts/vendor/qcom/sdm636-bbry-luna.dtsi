@@ -770,8 +770,80 @@
 	qcom,pm660@1 {
 		pm660_haptics: qcom,haptic@c000 {
 			qcom,actuator-type = "erm";
-			qcom,wave-play-rate-us = <5263>;
+			qcom,play-rate-us = <5263>;
 			qcom,vmax-mv = <3000>;
+			qcom,en-brake;
+			qcom,brake-pattern = [03 03 00 00];
+
+			/* ERM versions of the framework fallback effects. */
+			wf_0 {
+				/* CLICK: 30 ms direct drive. */
+				qcom,effect-id = <0>;
+				qcom,wf-vmax-mv = <3000>;
+				qcom,wf-direct-duration-us = <30000>;
+				qcom,wf-play-rate-us = <5263>;
+				qcom,wf-brake-pattern = [03 03 00 00];
+			};
+
+			wf_1 {
+				/* DOUBLE_CLICK: 30 ms on, 100 ms off, 30 ms on. */
+				qcom,effect-id = <1>;
+				qcom,wf-vmax-mv = <3000>;
+				qcom,wf-pattern = [
+					3e 3e 3e 3e 3e 3e
+					02 02 02 02 02 02 02 02 02 02
+					02 02 02 02 02 02 02 02 02
+					3e 3e 3e 3e 3e 3e
+				];
+				qcom,wf-play-rate-us = <5263>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [03 03 00 00];
+			};
+
+			wf_2 {
+				/* TICK: 10 ms direct drive. */
+				qcom,effect-id = <2>;
+				qcom,wf-vmax-mv = <3000>;
+				qcom,wf-direct-duration-us = <10000>;
+				qcom,wf-play-rate-us = <5263>;
+				qcom,wf-brake-pattern = [03 03 00 00];
+			};
+
+			wf_3 {
+				/* THUD has no framework fallback on this device. */
+				qcom,effect-id = <3>;
+				qcom,wf-vmax-mv = <3000>;
+				qcom,wf-pattern = [00];
+				qcom,wf-play-rate-us = <5263>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [00 00 00 00];
+			};
+
+			wf_4 {
+				/* POP has no framework fallback on this device. */
+				qcom,effect-id = <4>;
+				qcom,wf-vmax-mv = <3000>;
+				qcom,wf-pattern = [00];
+				qcom,wf-play-rate-us = <5263>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [00 00 00 00];
+			};
+
+			wf_5 {
+				/* HEAVY_CLICK: 5 ms on, 21 ms off, 21 ms on. */
+				qcom,effect-id = <5>;
+				qcom,wf-vmax-mv = <3000>;
+				qcom,wf-pattern = [
+					3e 02 02 02 02 3e 3e 3e 3e
+				];
+				qcom,wf-play-rate-us = <5263>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [03 03 00 00];
+			};
 		};
 	};
 	/* MODIFIED-END by Alvin, Task#5854245 */
