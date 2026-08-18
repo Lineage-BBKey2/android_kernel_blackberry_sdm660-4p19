@@ -845,9 +845,9 @@
 		interrupt-parent = <&tlmm>;
 		interrupts = <72 0>;
 
-		fp-gpio-reset = <&tlmm 20 0x00>;
-		fp-gpio-irq = <&tlmm 72 0x00>;
-		fp-gpio_pwr = <&tlmm 12 0x00>;
+		goodix,gpio_reset = <&tlmm 20 0x00>;
+		goodix,gpio_irq = <&tlmm 72 0x00>;
+		goodix,gpio_pwr = <&tlmm 12 0x00>;
 		/* MODIFIED-END by Ji.Chen,BUG-5872584*/
 
 		pinctrl-names = "goodixfp_pwr_active",
