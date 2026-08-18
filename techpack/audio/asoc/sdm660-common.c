@@ -5459,6 +5459,74 @@ static const struct of_device_id sdm660_asoc_machine_of_match[]  = {
 	{},
 };
 
+static int msm_config_hph_ext_switch(struct snd_soc_component *component,
+				     int enable)
+{
+	struct msm_asoc_mach_data *pdata =
+				snd_soc_card_get_drvdata(component->card);
+	int ret = 0;
+
+	if (gpio_is_valid(pdata->hph_ext_pa_gpio)) {
+		gpio_set_value_cansleep(pdata->hph_ext_pa_gpio, enable);
+	} else if (pdata->hph_ext_pa_gpio_p) {
+		if (enable)
+			ret = msm_cdc_pinctrl_select_active_state(
+					pdata->hph_ext_pa_gpio_p);
+		else
+			ret = msm_cdc_pinctrl_select_sleep_state(
+					pdata->hph_ext_pa_gpio_p);
+	} else {
+		return -ENODEV;
+	}
+
+	if (ret)
+		dev_err(component->dev,
+			"%s: failed to set external HPH switch %s: %d\n",
+			__func__, enable ? "active" : "sleep", ret);
+	else
+		dev_info(component->dev, "%s: external HPH switch %s\n",
+			__func__, enable ? "active" : "sleep");
+
+	return ret;
+}
+
+static void msm_prepare_hph_ext_switch(struct platform_device *pdev,
+				       struct msm_asoc_mach_data *pdata)
+{
+	const char *prop = "qcom,msm-hph-ext-switch";
+	int ret;
+
+	pdata->hph_ext_pa_gpio = of_get_named_gpio(pdev->dev.of_node,
+						     prop, 0);
+	if (gpio_is_valid(pdata->hph_ext_pa_gpio)) {
+		ret = devm_gpio_request_one(&pdev->dev,
+					    pdata->hph_ext_pa_gpio,
+					    GPIOF_OUT_INIT_LOW,
+					    "External HPH PA gpio");
+		if (ret) {
+			dev_err(&pdev->dev,
+				"%s: failed to request GPIO %d: %d\n",
+				__func__, pdata->hph_ext_pa_gpio, ret);
+			return;
+		}
+	} else {
+		pdata->hph_ext_pa_gpio_p =
+			of_parse_phandle(pdev->dev.of_node, prop, 0);
+		if (!pdata->hph_ext_pa_gpio_p)
+			return;
+
+		ret = msm_cdc_pinctrl_select_sleep_state(
+					pdata->hph_ext_pa_gpio_p);
+		if (ret)
+			dev_warn(&pdev->dev,
+				 "%s: failed to initialize switch low: %d\n",
+				 __func__, ret);
+	}
+
+	mbhc_cfg.codec_hph_switch_cb = msm_config_hph_ext_switch;
+	dev_info(&pdev->dev, "%s: external HPH switch detected\n", __func__);
+}
+
 static int msm_asoc_machine_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = NULL;
@@ -5557,6 +5625,8 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 
 	if (of_find_property(pdev->dev.of_node, usb_c_dt, NULL))
 		mbhc_cfg.swap_gnd_mic = msm_swap_gnd_mic;
+
+	msm_prepare_hph_ext_switch(pdev, pdata);
 
 	/* MODIFIED-BEGIN by hongwei.tian, 2017-08-29,BUG-5232247*/
 #ifdef CONFIG_TCT_SDM660_COMMON

@@ -971,6 +971,8 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 		}
 #endif
 		/* MODIFIED-END by hongwei.tian,BUG-5867922*/
+		if (mbhc->mbhc_cfg->codec_hph_switch_cb)
+			mbhc->mbhc_cfg->codec_hph_switch_cb(component, 1);
 
 		/* If moisture is present, then enable polling, disable
 		 * moisture detection and wait for interrupt
@@ -1007,6 +1009,9 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 			mbhc->mbhc_fn->wcd_mbhc_detect_plug_type(mbhc);
 	} else if ((mbhc->current_plug != MBHC_PLUG_TYPE_NONE)
 			&& !detection_type) {
+		if (mbhc->mbhc_cfg->codec_hph_switch_cb)
+			mbhc->mbhc_cfg->codec_hph_switch_cb(component, 0);
+
 		/* Disable external voltage source to micbias if present */
 		if (mbhc->mbhc_cb->enable_mb_source)
 			mbhc->mbhc_cb->enable_mb_source(mbhc, false);
@@ -1076,6 +1081,9 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 		}
 
 	} else if (!detection_type) {
+		if (mbhc->mbhc_cfg->codec_hph_switch_cb)
+			mbhc->mbhc_cfg->codec_hph_switch_cb(component, 0);
+
 		/* Disable external voltage source to micbias if present */
 		if (mbhc->mbhc_cb->enable_mb_source)
 			mbhc->mbhc_cb->enable_mb_source(mbhc, false);
