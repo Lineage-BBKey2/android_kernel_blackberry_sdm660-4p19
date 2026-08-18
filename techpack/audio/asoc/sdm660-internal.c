@@ -483,6 +483,23 @@ static int is_ext_spk_gpio_support(struct platform_device *pdev,
 	return 0;
 }
 
+#ifdef CONFIG_SND_SOC_AW87319
+extern unsigned char aw87319_audio_speaker(void);
+extern unsigned char aw87319_audio_off(void);
+
+static int enable_spk_ext_pa(struct snd_soc_component *component, int enable)
+{
+	pr_debug("%s: %s external speaker PA\n", __func__,
+		enable ? "Enable" : "Disable");
+
+	if (enable)
+		aw87319_audio_speaker();
+	else
+		aw87319_audio_off();
+
+	return 0;
+}
+#else
 static int enable_spk_ext_pa(struct snd_soc_component *component, int enable)
 {
 	struct snd_soc_card *card = component->card;
@@ -519,6 +536,7 @@ static int enable_spk_ext_pa(struct snd_soc_component *component, int enable)
 	}
 	return 0;
 }
+#endif
 
 static int int_mi2s_get_idx_from_beid(int32_t id)
 {
