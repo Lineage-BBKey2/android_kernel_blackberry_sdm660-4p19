@@ -2889,6 +2889,7 @@
 						"default";
 		pinctrl-0 = <&gpio_key_active &key_vol_up_default>;
 		pinctrl-1 = <&gpio_key_suspend>;
+		pinctrl-2 = <&gpio_key_active &key_vol_up_default>;
 
 		camera_focus {
 			label = "camera_focus";
