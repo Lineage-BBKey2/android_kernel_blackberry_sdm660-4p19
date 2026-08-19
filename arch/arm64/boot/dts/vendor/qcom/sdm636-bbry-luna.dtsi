@@ -366,6 +366,7 @@
 
 	gpio_keys {
 		/delete-node/ camera_snapshot;
+		/delete-node/ camera_focus;
 		conven_key {
 			label = "conven_key";
 			gpios = <&tlmm 113 0x1>;
