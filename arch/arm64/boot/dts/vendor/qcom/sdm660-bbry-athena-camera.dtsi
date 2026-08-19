@@ -1,0 +1,62 @@
+/*
+ * BlackBerry KEY2 (athena) telephoto camera routing overrides.
+ *
+ * The generic node names retain Qualcomm's MCLK2 naming, but Athena's
+ * secondary rear sensor is physically routed through GPIO33 and the
+ * MCLK1 clock source in the working BlackBerry 4.4 device tree.
+ */
+
+&cci {
+	qcom,eeprom@2 {
+		clocks = <&clock_mmss MCLK1_CLK_SRC>,
+			<&clock_mmss MMSS_CAMSS_MCLK1_CLK>;
+	};
+
+	qcom,camera@2 {
+		clocks = <&clock_mmss MCLK1_CLK_SRC>,
+			<&clock_mmss MMSS_CAMSS_MCLK1_CLK>;
+	};
+
+	/* Athena has no usable fourth/front-iris camera node. */
+	/delete-node/ qcom,camera@3;
+};
+
+&cam_sensor_mclk2_active {
+	mux {
+		pins = "gpio33";
+	};
+
+	config {
+		pins = "gpio33";
+	};
+};
+
+&cam_sensor_mclk2_suspend {
+	mux {
+		pins = "gpio33";
+	};
+
+	config {
+		pins = "gpio33";
+	};
+};
+
+&cam_sensor_rear2_active {
+	mux {
+		pins = "gpio47", "gpio51";
+	};
+
+	config {
+		pins = "gpio47", "gpio51";
+	};
+};
+
+&cam_sensor_rear2_suspend {
+	mux {
+		pins = "gpio47", "gpio51";
+	};
+
+	config {
+		pins = "gpio47", "gpio51";
+	};
+};
