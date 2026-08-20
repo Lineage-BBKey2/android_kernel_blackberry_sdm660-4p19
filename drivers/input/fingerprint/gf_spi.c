@@ -46,7 +46,18 @@
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #include <linux/pm_qos.h>
+#include <linux/pm_wakeup.h>
 #include <linux/cpufreq.h>
+
+/*
+ * Hold the SoC awake for 500 ms after a fingerprint IRQ so gx_fpd has
+ * time to drain /dev/goodix_fp before the kernel re-enters idle. This
+ * prevents aggressive modern Android doze policies from suspending the
+ * device while userspace is processing a fingerprint event. The pattern
+ * matches the goodixfp3206 sister driver and the Xiaomi pix106/whyred
+ * goodix gf_spi.c references. */
+#define GF_WAKELOCK_HOLD_TIME 500 /* ms */
+static struct wakeup_source *fp_wakelock;
 
 #include "gf_spi.h"
 
@@ -440,6 +451,12 @@ gf_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 static irqreturn_t gf_irq(int irq, void *handle)
 {
 	struct gf_dev *gf_dev = &gf;
+
+	/* Keep the SoC awake briefly so userspace (gx_fpd) can read
+	 * /dev/goodix_fp before idle re-suspends. */
+       if (fp_wakelock)
+               __pm_wakeup_event(fp_wakelock, GF_WAKELOCK_HOLD_TIME);
+
 #ifdef GF_FASYNC
 	if (gf_dev->async)
 		kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
@@ -702,6 +719,7 @@ static int gf_probe(struct platform_device *pdev)
                             "gf", gf_dev);
 #endif
 		if (!ret) {
+			fp_wakelock = wakeup_source_register(NULL, "fp_wakelock");
 			enable_irq_wake(gf_dev->irq);
 			gf_disable_irq(gf_dev);
 		}
@@ -743,8 +761,13 @@ static int gf_remove(struct platform_device *pdev)
 	FUNC_ENTRY();
 
 	/* make sure ops on existing fds can abort cleanly */
-	if (gf_dev->irq)
+	if (gf_dev->irq) {
 		free_irq(gf_dev->irq, gf_dev);
+		if (fp_wakelock) {
+			wakeup_source_unregister(fp_wakelock);
+			fp_wakelock = NULL;
+		}
+	}
 
 	if (gf_dev->input != NULL) {
 		input_unregister_device(gf_dev->input);
