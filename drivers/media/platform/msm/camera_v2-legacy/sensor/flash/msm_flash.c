@@ -630,20 +630,10 @@ static int32_t msm_flash_low(
 	for (i = 0; i < flash_ctrl->torch_num_sources; i++) {
 		if (flash_ctrl->torch_trigger[i]) {
 			max_current = flash_ctrl->torch_max_current[i];
-			/*
-			 * Dual LED fix: HAL only sets flash_current[0],
-			 * mirror to other LEDs for balanced dual-tone output.
-			 */
-			if (flash_data->flash_current[i] > 0 &&
+			if (flash_data->flash_current[i] >= 0 &&
 				flash_data->flash_current[i] <
 				max_current) {
 				curr = flash_data->flash_current[i];
-			} else if (i > 0 &&
-				flash_data->flash_current[i] == 0 &&
-				flash_data->flash_current[0] > 0) {
-				curr = flash_data->flash_current[0];
-				if (curr >= max_current)
-					curr = flash_ctrl->torch_op_current[i];
 			} else {
 				curr = flash_ctrl->torch_op_current[i];
 				pr_debug("LED current clamped to %d\n",
@@ -677,20 +667,10 @@ static int32_t msm_flash_high(
 	for (i = 0; i < flash_ctrl->flash_num_sources; i++) {
 		if (flash_ctrl->flash_trigger[i]) {
 			max_current = flash_ctrl->flash_max_current[i];
-			/*
-			 * Dual LED fix: HAL only sets flash_current[0],
-			 * mirror to other LEDs for balanced dual-tone output.
-			 */
-			if (flash_data->flash_current[i] > 0 &&
+			if (flash_data->flash_current[i] >= 0 &&
 				flash_data->flash_current[i] <
 				max_current) {
 				curr = flash_data->flash_current[i];
-			} else if (i > 0 &&
-				flash_data->flash_current[i] == 0 &&
-				flash_data->flash_current[0] > 0) {
-				curr = flash_data->flash_current[0];
-				if (curr >= max_current)
-					curr = flash_ctrl->flash_op_current[i];
 			} else {
 				curr = flash_ctrl->flash_op_current[i];
 				pr_debug("LED flash_current[%d] clamped %d\n",
