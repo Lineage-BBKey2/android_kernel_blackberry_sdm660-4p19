@@ -92,10 +92,15 @@
 #ifdef CONFIG_STMPE_KEYPAD_DDT
 #endif
 
-/* TEMP */
-#define debug(str, args...) /* dev_err(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)*/
-#define info(str, args...) dev_err(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)
-#define warn(str, args...) dev_err(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)
+/*
+ * These were all wired to dev_err (marked TEMP upstream), so routine
+ * chatter — including the periodic STATS dump from the keypad timer — was
+ * emitted at error level and could not be told apart from a real keypad
+ * fault. Route each level where it belongs.
+ */
+#define debug(str, args...) dev_dbg(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)
+#define info(str, args...) dev_dbg(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)
+#define warn(str, args...) dev_warn(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)
 #define error(str, args...) dev_err(&keypad->i2c_client->dev, "%s: " str "\n", __func__, ##args)
 
 struct key_data {

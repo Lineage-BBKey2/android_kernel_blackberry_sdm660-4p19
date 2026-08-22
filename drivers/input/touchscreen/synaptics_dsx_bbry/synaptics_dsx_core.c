@@ -1874,7 +1874,7 @@ static void stats_timeout_work(struct work_struct *work)
 
 	if (total != 0 || touch != 0 ||
 		status != 0 || reset != 0 || error != 0) {
-		dev_info(rmi4_data->pdev->dev.parent,
+		dev_dbg(rmi4_data->pdev->dev.parent,
 			"[%6u.%6u] INT=%d INT_S=%d T=%d REPORT_T=%d FR=%d TR=%d LO=%d STAT=%d RST=%d ERR=%d\n",
 			secs, usecs, total, total_served, touch, report_touch, finger_release, touch_release, large_object, status, reset, error);
 	}
