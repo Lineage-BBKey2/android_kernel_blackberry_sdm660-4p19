@@ -805,7 +805,7 @@ static int gf_suspend(struct platform_device *pdev, pm_message_t state)
 	gfspi_device = spi_get_drvdata(spi);
 	gfspi_ioctl_clk_disable(gfspi_device);
 #endif
-	pr_info(KERN_ERR "gf_suspend_test.\n");
+	pr_debug("gf_suspend\n");
 	return 0;
 }
 
@@ -823,7 +823,7 @@ static int gf_resume(struct platform_device *pdev)
 	gfspi_device = spi_get_drvdata(spi);
 	gfspi_ioctl_clk_enable(gfspi_device);
 #endif
-	pr_info(KERN_ERR "gf_resume_test.\n");
+	pr_debug("gf_resume\n");
 	return 0;
 }
 
