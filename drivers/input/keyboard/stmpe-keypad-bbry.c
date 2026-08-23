@@ -477,7 +477,7 @@ static ssize_t stmpe_keypad_show_counters(struct device *dev,
 			"total interrupts = %d\n",
 						keypad->counters.interrupts);
 	size += snprintf(buf + size, PAGE_SIZE - size,
-			"total overflows = %d\n",
+			"total overflows (cumulative) = %d\n",
 						keypad->counters.overflows);
 	size += snprintf(buf + size, PAGE_SIZE - size,
 			"longest key press = %ld\n",
@@ -551,7 +551,21 @@ static void stmpe_keypad_reset_counters(struct stmpe_keypad *keypad)
 	keypad->counters.i2c_rd_errors = 0;
 	keypad->counters.i2c_wrt_errors = 0;
 	keypad->counters.proxi_errors = 0;
-	keypad->counters.overflows = 0;
+	/*
+	 * overflows is deliberately not cleared here.
+	 *
+	 * This function is called from stmpe_keypad_show_counters() just
+	 * before it returns, so every read of the keypad_counters attribute
+	 * zeroes what it just printed - the values are deltas since the
+	 * previous read, not totals since boot. That is fine for the
+	 * pre-existing counters, which are sampled while someone is watching.
+	 *
+	 * An overflow is a rare fault that may happen with nobody looking,
+	 * and it must still be visible afterwards. dmesg cannot be relied on
+	 * as the durable record either: the ring covers minutes on this
+	 * device and there is no pstore behind it. So keep this one
+	 * cumulative, and let it be the thing that survives.
+	 */
 
 	for (i = 0; i < ARRAY_SIZE(down_time); i++)
 		down_time[i].val = 0;
