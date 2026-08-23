@@ -94,7 +94,7 @@
 
 /*
  * These were all wired to dev_err (marked TEMP upstream), so routine
- * chatter — including the periodic STATS dump from the keypad timer — was
+ * chatter - including the periodic STATS dump from the keypad timer - was
  * emitted at error level and could not be told apart from a real keypad
  * fault. Route each level where it belongs.
  */
@@ -195,6 +195,7 @@ struct stmpe_keypad {
 		int i2c_rd_errors;
 		int i2c_wrt_errors;
 		int proxi_errors;
+		int overflows;
 	} counters;
 	struct log_entry event_log[KEYPAD_EVENT_LOG_SIZE];
 	int log_idx;
@@ -476,6 +477,9 @@ static ssize_t stmpe_keypad_show_counters(struct device *dev,
 			"total interrupts = %d\n",
 						keypad->counters.interrupts);
 	size += snprintf(buf + size, PAGE_SIZE - size,
+			"total overflows = %d\n",
+						keypad->counters.overflows);
+	size += snprintf(buf + size, PAGE_SIZE - size,
 			"longest key press = %ld\n",
 					keypad->counters.high_key_time);
 	size += snprintf(buf + size, PAGE_SIZE - size,
@@ -547,6 +551,7 @@ static void stmpe_keypad_reset_counters(struct stmpe_keypad *keypad)
 	keypad->counters.i2c_rd_errors = 0;
 	keypad->counters.i2c_wrt_errors = 0;
 	keypad->counters.proxi_errors = 0;
+	keypad->counters.overflows = 0;
 
 	for (i = 0; i < ARRAY_SIZE(down_time); i++)
 		down_time[i].val = 0;
@@ -1306,12 +1311,37 @@ static int stmpe_keypad_process_events(struct stmpe_keypad *keypad)
 		goto unlock_ret;
 	}
 
-	/* Handle overflow interrupt */
-	if (status & INT_I2_KEYPAD_OVERFLOW)
-		error("Keypad overflow interrupt");
+	/*
+	 * Handle overflow interrupt.
+	 *
+	 * Logging alone used to leave the controller queue full. The IRQ line
+	 * is level triggered (msmgpio 13 Level), so with the condition still
+	 * asserted this handler was re-entered every ~43 ms - the duration of
+	 * one I2C status read - indefinitely. Interrupts kept counting while
+	 * no key was ever decoded: observed 189 messages per episode with
+	 * total_interrupts rising and total_keys_pressed stuck at zero, i.e.
+	 * a dead keyboard until the controller was re-initialised by hand via
+	 * the 'enabled' sysfs attribute.
+	 *
+	 * Draining is what clears the condition, so do it whenever overflow is
+	 * reported, not only when INT_I1_KEYPAD happens to be set as well.
+	 * stmpe_handle_keypress() already reads REG_KPC_DATA in a do/while
+	 * until the controller reports no further events, which is exactly the
+	 * behaviour needed here.
+	 *
+	 * The message is rate limited: at 43 ms it would otherwise flood the
+	 * kernel ring, which on this device holds only minutes of history and
+	 * has no pstore behind it.
+	 */
+	if (status & INT_I2_KEYPAD_OVERFLOW) {
+		dev_err_ratelimited(&keypad->i2c_client->dev,
+			"%s: Keypad overflow interrupt, draining queue\n",
+			__func__);
+		keypad->counters.overflows++;
+	}
 
-	/* Handle keypad interrupt */
-	if (status & INT_I1_KEYPAD)
+	/* Handle keypad interrupt, or drain after an overflow */
+	if (status & (INT_I1_KEYPAD | INT_I2_KEYPAD_OVERFLOW))
 		ret = stmpe_handle_keypress(keypad);
 
 unlock_ret:
