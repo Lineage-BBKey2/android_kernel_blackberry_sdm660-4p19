@@ -301,10 +301,16 @@ int cqhci_host_init_crypto_qti_spec(struct cqhci_host *host,
 		goto out;
 	}
 
+	/*
+	 * BlackBerry's legacy PFK ICE firmware only accepts a raw 32-byte
+	 * key + 32-byte salt (see crypto_qti_program_key()) -- it has no
+	 * concept of hardware-wrapped keys, so don't advertise that
+	 * capability and risk upper layers picking a key type we'll
+	 * silently reject.
+	 */
 	host->ksm = keyslot_manager_create(host->mmc->parent,
 					   cqhci_num_keyslots(host) - BBRY_ICE_RESERVED_SLOTS, ksm_ops,
-					   BLK_CRYPTO_FEATURE_STANDARD_KEYS |
-					   BLK_CRYPTO_FEATURE_WRAPPED_KEYS,
+					   BLK_CRYPTO_FEATURE_STANDARD_KEYS,
 					   crypto_modes_supported, host);
 
 	if (!host->ksm) {

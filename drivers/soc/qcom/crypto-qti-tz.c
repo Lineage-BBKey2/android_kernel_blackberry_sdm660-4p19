@@ -59,7 +59,8 @@ int crypto_qti_program_key(struct crypto_vops_qti_entry *ice_entry,
 	 * interface: a 32-byte XTS key and a separate 32-byte XTS salt.
 	 */
 	if (key->is_hw_wrapped || key->size != 64) {
-		err = -EOPNOTSUPP;
+		qtee_shmbridge_free_shm(&shm);
+		return -EOPNOTSUPP;
 	}
 
 	smc_id = BBRY_TZ_ES_SET_ICE_KEY_ID;
@@ -70,7 +71,7 @@ int crypto_qti_program_key(struct crypto_vops_qti_entry *ice_entry,
 	desc.args[3] = shm.paddr + 32;
 	desc.args[4] = 32;
 
-	err = scm_call2(smc_id, &desc);
+	err = scm_call2_noretry(smc_id, &desc);
 
 	if (err)
 		pr_err("%s:SCM call Error: 0x%x slot %d\n",
@@ -93,7 +94,7 @@ int crypto_qti_invalidate_key(
 	desc.arginfo = BBRY_TZ_ES_INVALIDATE_ICE_KEY_PARAM_ID;
 	desc.args[0] = slot;
 
-	err = scm_call2(smc_id, &desc);
+	err = scm_call2_noretry(smc_id, &desc);
 	if (err)
 		pr_err("%s:SCM call Error: 0x%x\n", __func__, err);
 	return err;
