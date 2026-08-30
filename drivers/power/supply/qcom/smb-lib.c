@@ -961,6 +961,18 @@ int smblib_set_icl_current(struct smb_charger *chg, int icl_ua)
 		}
 	} else {
 		set_sdp_current(chg, 100000);
+		/*
+		 * A USB-PD source may advertise more current than the PMIC can
+		 * represent. Clamp the request to the USB ICL hardware limit rather
+		 * than rejecting it and leaving the input current limit unset.
+		 */
+		if (icl_ua > chg->param.usb_icl.max_u) {
+			smblib_dbg(chg, PR_MISC,
+				"USB ICL %d exceeds maximum %d, clamping\n",
+				icl_ua, chg->param.usb_icl.max_u);
+			icl_ua = chg->param.usb_icl.max_u;
+		}
+
 		rc = smblib_set_charge_param(chg, &chg->param.usb_icl, icl_ua);
 		if (rc < 0) {
 			smblib_err(chg, "Couldn't set HC ICL rc=%d\n", rc);
