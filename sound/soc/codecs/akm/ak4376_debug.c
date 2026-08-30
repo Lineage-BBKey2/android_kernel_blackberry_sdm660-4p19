@@ -1,7 +1,7 @@
 /* Copyright (C) 2016 Tcl Corporation Limited */
 void ak4376_bclk_mode(struct snd_soc_component *component)
 {
-	printk("\n\n>>> BLCK MODE INIT <<<\n\n");
+	pr_debug(">>> BLCK MODE INIT <<<\n");
 
 	/*
 	 *  AKM FAE suggest move power related regs into on/off

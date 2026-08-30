@@ -20,7 +20,10 @@
   * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
   */
 
-#define DEBUG
+/*
+ * Do not define DEBUG here. It turns pr_debug() into an unconditional
+ * printk when dynamic debug is disabled.
+ */
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/ioctl.h>
@@ -368,7 +371,7 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 
                 for(i = 0; i< ARRAY_SIZE(key_map); i++) {
-				 pr_warn("my key_map[%d].val is %d \n", i,key_map[i].val);
+				 pr_debug("my key_map[%d].val is %d \n", i,key_map[i].val);
                     if(key_map[i].val == gf_key.key){
                         /* MODIFIED-BEGIN by siguo.cheng, 2018-01-15,BUG-5869249*/
                         if (KEY_F1 == gf_key.key) {
