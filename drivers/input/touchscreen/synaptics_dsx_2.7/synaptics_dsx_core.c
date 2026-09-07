@@ -818,6 +818,46 @@ static ssize_t synaptics_rmi4_f01_flashprog_show(struct device *dev,
 			device_status.flash_prog);
 }
 
+static int synaptics_rmi4_apply_0dbutton_state(
+		struct synaptics_rmi4_data *rmi4_data, bool enabled)
+{
+	int retval = 0;
+	unsigned char ii;
+	unsigned char intr_enable;
+	struct synaptics_rmi4_fn *fhandler;
+	struct synaptics_rmi4_device_info *rmi =
+			&rmi4_data->rmi4_mod_info;
+
+	if (list_empty(&rmi->support_fn_list))
+		return -ENODEV;
+
+	list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
+		if (fhandler->fn_number != SYNAPTICS_RMI4_F1A)
+			continue;
+
+		ii = fhandler->intr_reg_num;
+
+		retval = synaptics_rmi4_reg_read(rmi4_data,
+				rmi4_data->f01_ctrl_base_addr + 1 + ii,
+				&intr_enable, sizeof(intr_enable));
+		if (retval < 0)
+			return retval;
+
+		if (enabled)
+			intr_enable |= fhandler->intr_mask;
+		else
+			intr_enable &= ~fhandler->intr_mask;
+
+		retval = synaptics_rmi4_reg_write(rmi4_data,
+				rmi4_data->f01_ctrl_base_addr + 1 + ii,
+				&intr_enable, sizeof(intr_enable));
+		if (retval < 0)
+			return retval;
+	}
+
+	return retval;
+}
+
 static ssize_t synaptics_rmi4_0dbutton_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -832,49 +872,17 @@ static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
 {
 	int retval;
 	unsigned int input;
-	unsigned char ii;
-	unsigned char intr_enable;
-	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(g_rmi4_dev);
-	struct synaptics_rmi4_device_info *rmi;
-
-	rmi = &(rmi4_data->rmi4_mod_info);
 
 	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	input = input > 0 ? 1 : 0;
 
-	if (rmi4_data->button_0d_enabled == input)
-		return count;
-
-	if (list_empty(&rmi->support_fn_list))
-		return -ENODEV;
-
-	list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-		if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
-			ii = fhandler->intr_reg_num;
-
-			retval = synaptics_rmi4_reg_read(rmi4_data,
-					rmi4_data->f01_ctrl_base_addr + 1 + ii,
-					&intr_enable,
-					sizeof(intr_enable));
-			if (retval < 0)
-				return retval;
-
-			if (input == 1)
-				intr_enable |= fhandler->intr_mask;
-			else
-				intr_enable &= ~fhandler->intr_mask;
-
-			retval = synaptics_rmi4_reg_write(rmi4_data,
-					rmi4_data->f01_ctrl_base_addr + 1 + ii,
-					&intr_enable,
-					sizeof(intr_enable));
-			if (retval < 0)
-				return retval;
-		}
-	}
+	/* Always reapply the hardware mask, even if the cached state matches. */
+	retval = synaptics_rmi4_apply_0dbutton_state(rmi4_data, input);
+	if (retval < 0)
+		return retval;
 
 	rmi4_data->button_0d_enabled = input;
 
@@ -1905,7 +1913,8 @@ static void synaptics_rmi4_report_touch(struct synaptics_rmi4_data *rmi4_data,
 			rmi4_data->fingers_on_2d = false;
 		break;
 	case SYNAPTICS_RMI4_F1A:
-		synaptics_rmi4_f1a_report(rmi4_data, fhandler);
+		if (rmi4_data->button_0d_enabled)
+			synaptics_rmi4_f1a_report(rmi4_data, fhandler);
 		break;
 #ifdef USE_DATA_SERVER
 	case SYNAPTICS_RMI4_F21:
@@ -4237,6 +4246,12 @@ static int synaptics_rmi4_reinit_device(struct synaptics_rmi4_data *rmi4_data)
 	if (retval < 0)
 		goto exit;
 
+	/* A controller reset restores the full interrupt mask. */
+	retval = synaptics_rmi4_apply_0dbutton_state(rmi4_data,
+			rmi4_data->button_0d_enabled);
+	if (retval < 0)
+		goto exit;
+
 	mutex_lock(&exp_data.mutex);
 	if (!list_empty(&exp_data.list)) {
 		list_for_each_entry(exp_fhandler, &exp_data.list, link)
@@ -5127,6 +5142,10 @@ exit:
 	mutex_unlock(&exp_data.mutex);
 	synaptics_rmi4_f12_glove_enable(rmi4_data, rmi4_data->glove_mode);
 	synaptics_rmi4_f12_cover_enable(rmi4_data, rmi4_data->cover_mode); // MODIFIED by Haojun Chen, 2017-08-08,BUG-5159539
+	if (synaptics_rmi4_apply_0dbutton_state(rmi4_data,
+			rmi4_data->button_0d_enabled) < 0)
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Failed to restore 0D button state\n", __func__);
 
 	rmi4_data->suspend = false;
 
