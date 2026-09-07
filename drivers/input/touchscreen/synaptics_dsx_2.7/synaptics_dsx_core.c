@@ -675,6 +675,11 @@ struct synaptics_rmi4_f1a_handle {
 	unsigned char valid_button_count;
 	unsigned char *button_data_buffer;
 	unsigned int *button_map;
+	bool current_status[MAX_NUMBER_OF_BUTTONS];
+#ifdef NO_0D_WHILE_2D
+	bool before_2d_status[MAX_NUMBER_OF_BUTTONS];
+	bool while_2d_status[MAX_NUMBER_OF_BUTTONS];
+#endif
 	struct synaptics_rmi4_f1a_query button_query;
 	struct synaptics_rmi4_f1a_control button_control;
 };
@@ -818,6 +823,61 @@ static ssize_t synaptics_rmi4_f01_flashprog_show(struct device *dev,
 			device_status.flash_prog);
 }
 
+static void synaptics_rmi4_release_0d_buttons(
+		struct synaptics_rmi4_data *rmi4_data)
+{
+	bool sync = false;
+	unsigned char button;
+	struct synaptics_rmi4_f1a_handle *f1a;
+	struct synaptics_rmi4_fn *fhandler;
+	struct synaptics_rmi4_device_info *rmi =
+			&rmi4_data->rmi4_mod_info;
+
+	/*
+	 * A display transition or controller reset can discard the hardware
+	 * release while the input core still has a navigation key pressed.
+	 * Release only keys that this driver actually reported as pressed, then
+	 * clear all F1A suppression state before reporting resumes.
+	 */
+	if (list_empty(&rmi->support_fn_list))
+		return;
+
+	list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
+		if (fhandler->fn_number != SYNAPTICS_RMI4_F1A)
+			continue;
+
+		f1a = fhandler->data;
+		if (!f1a)
+			return;
+
+		mutex_lock(&rmi4_data->rmi4_report_mutex);
+
+		for (button = 0; button < f1a->valid_button_count; button++) {
+#ifdef NO_0D_WHILE_2D
+			if (f1a->before_2d_status[button]) {
+#else
+			if (f1a->current_status[button]) {
+#endif
+				input_report_key(rmi4_data->input_dev,
+						f1a->button_map[button], 0);
+				sync = true;
+			}
+
+			f1a->current_status[button] = false;
+#ifdef NO_0D_WHILE_2D
+			f1a->before_2d_status[button] = false;
+			f1a->while_2d_status[button] = false;
+#endif
+		}
+
+		if (sync)
+			input_sync(rmi4_data->input_dev);
+
+		mutex_unlock(&rmi4_data->rmi4_report_mutex);
+		return;
+	}
+}
+
 static int synaptics_rmi4_apply_0dbutton_state(
 		struct synaptics_rmi4_data *rmi4_data, bool enabled)
 {
@@ -885,6 +945,8 @@ static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
 		return retval;
 
 	rmi4_data->button_0d_enabled = input;
+	if (!input)
+		synaptics_rmi4_release_0d_buttons(rmi4_data);
 
 	return count;
 }
@@ -1792,21 +1854,6 @@ static void synaptics_rmi4_f1a_report(struct synaptics_rmi4_data *rmi4_data,
 	unsigned char *data;
 	unsigned short data_addr = fhandler->full_addr.data_base;
 	struct synaptics_rmi4_f1a_handle *f1a = fhandler->data;
-	static unsigned char do_once = 1;
-	static bool current_status[MAX_NUMBER_OF_BUTTONS];
-#ifdef NO_0D_WHILE_2D
-	static bool before_2d_status[MAX_NUMBER_OF_BUTTONS];
-	static bool while_2d_status[MAX_NUMBER_OF_BUTTONS];
-#endif
-
-	if (do_once) {
-		memset(current_status, 0, sizeof(current_status));
-#ifdef NO_0D_WHILE_2D
-		memset(before_2d_status, 0, sizeof(before_2d_status));
-		memset(while_2d_status, 0, sizeof(while_2d_status));
-#endif
-		do_once = 0;
-	}
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			data_addr,
@@ -1822,16 +1869,18 @@ static void synaptics_rmi4_f1a_report(struct synaptics_rmi4_data *rmi4_data,
 	data = f1a->button_data_buffer;
 
 	mutex_lock(&(rmi4_data->rmi4_report_mutex));
+	if (!rmi4_data->button_0d_enabled || rmi4_data->suspend)
+		goto exit;
 
 	for (button = 0; button < f1a->valid_button_count; button++) {
 		index = button / 8;
 		shift = button % 8;
 		status = ((data[index] >> shift) & MASK_1BIT);
 
-		if (current_status[button] == status)
+		if (f1a->current_status[button] == status)
 			continue;
 		else
-			current_status[button] = status;
+			f1a->current_status[button] = status;
 
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: Button %d (code %d) ->%d\n",
@@ -1841,13 +1890,13 @@ static void synaptics_rmi4_f1a_report(struct synaptics_rmi4_data *rmi4_data,
 #ifdef NO_0D_WHILE_2D
 		if (rmi4_data->fingers_on_2d == false) {
 			if (status == 1) {
-				before_2d_status[button] = 1;
+				f1a->before_2d_status[button] = 1;
 			} else {
-				if (while_2d_status[button] == 1) {
-					while_2d_status[button] = 0;
+				if (f1a->while_2d_status[button] == 1) {
+					f1a->while_2d_status[button] = 0;
 					continue;
 				} else {
-					before_2d_status[button] = 0;
+					f1a->before_2d_status[button] = 0;
 				}
 			}
 			touch_count++;
@@ -1855,17 +1904,17 @@ static void synaptics_rmi4_f1a_report(struct synaptics_rmi4_data *rmi4_data,
 					f1a->button_map[button],
 					status);
 		} else {
-			if (before_2d_status[button] == 1) {
-				before_2d_status[button] = 0;
+			if (f1a->before_2d_status[button] == 1) {
+				f1a->before_2d_status[button] = 0;
 				touch_count++;
 				input_report_key(rmi4_data->input_dev,
 						f1a->button_map[button],
 						status);
 			} else {
 				if (status == 1)
-					while_2d_status[button] = 1;
+					f1a->while_2d_status[button] = 1;
 				else
-					while_2d_status[button] = 0;
+					f1a->while_2d_status[button] = 0;
 			}
 		}
 #else
@@ -1879,6 +1928,7 @@ static void synaptics_rmi4_f1a_report(struct synaptics_rmi4_data *rmi4_data,
 	if (touch_count)
 		input_sync(rmi4_data->input_dev);
 
+exit:
 	mutex_unlock(&(rmi4_data->rmi4_report_mutex));
 
 	return;
@@ -1913,7 +1963,7 @@ static void synaptics_rmi4_report_touch(struct synaptics_rmi4_data *rmi4_data,
 			rmi4_data->fingers_on_2d = false;
 		break;
 	case SYNAPTICS_RMI4_F1A:
-		if (rmi4_data->button_0d_enabled)
+		if (rmi4_data->button_0d_enabled && !rmi4_data->suspend)
 			synaptics_rmi4_f1a_report(rmi4_data, fhandler);
 		break;
 #ifdef USE_DATA_SERVER
@@ -4231,6 +4281,7 @@ static int synaptics_rmi4_reinit_device(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&(rmi4_data->rmi4_reset_mutex));
 
+	synaptics_rmi4_release_0d_buttons(rmi4_data);
 	synaptics_rmi4_free_fingers(rmi4_data);
 
 	if (!list_empty(&rmi->support_fn_list)) {
@@ -4278,6 +4329,7 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 	mutex_lock(&(rmi4_data->rmi4_reset_mutex));
 
 	synaptics_rmi4_irq_enable(rmi4_data, false, false);
+	synaptics_rmi4_release_0d_buttons(rmi4_data);
 
 	retval = synaptics_rmi4_sw_reset(rmi4_data);
 	if (retval < 0) {
@@ -4987,6 +5039,7 @@ exit:
 	mutex_unlock(&exp_data.mutex);
 
 	rmi4_data->suspend = true;
+	synaptics_rmi4_release_0d_buttons(rmi4_data);
 
 	return;
 }
@@ -5035,6 +5088,7 @@ exit:
 	}
 	mutex_unlock(&exp_data.mutex);
 
+	synaptics_rmi4_release_0d_buttons(rmi4_data);
 	rmi4_data->suspend = false;
 
 	return;
@@ -5099,6 +5153,7 @@ exit:
 	mutex_unlock(&exp_data.mutex);
 
 	rmi4_data->suspend = true;
+	synaptics_rmi4_release_0d_buttons(rmi4_data);
 
 	return 0;
 }
@@ -5147,6 +5202,7 @@ exit:
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to restore 0D button state\n", __func__);
 
+	synaptics_rmi4_release_0d_buttons(rmi4_data);
 	rmi4_data->suspend = false;
 
 	return 0;
