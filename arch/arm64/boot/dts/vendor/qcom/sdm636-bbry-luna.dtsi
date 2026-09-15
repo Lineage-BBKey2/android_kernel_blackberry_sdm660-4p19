@@ -834,15 +834,11 @@
 			};
 
 			wf_5 {
-				/* HEAVY_CLICK: 5 ms on, 21 ms off, 21 ms on. */
+				/* HEAVY_CLICK: legacy 30 ms full-strength pulse. */
 				qcom,effect-id = <5>;
 				qcom,wf-vmax-mv = <3000>;
-				qcom,wf-pattern = [
-					3e 02 02 02 02 3e 3e 3e 3e
-				];
+				qcom,wf-direct-duration-us = <30000>;
 				qcom,wf-play-rate-us = <5263>;
-				qcom,wf-repeat-count = <1>;
-				qcom,wf-s-repeat-count = <1>;
 				qcom,wf-brake-pattern = [03 03 00 00];
 			};
 		};

@@ -952,11 +952,12 @@
 
 	/* MODIFIED-BEGIN by qifeng.wu, 2017-12-05,BUG-5711757 (ported to qti-haptics/4.19)
 	 *
-	 * athena LRA tuning. LOS22 used qpnp-haptic which read qcom,wave-shape,
-	 * qcom,wave-play-rate-us, qcom,lra-auto-res-mode, qcom,lra-high-z. LOS23
-	 * uses qti-haptics which uses different names (qcom,play-rate-us,
-	 * qcom,lra-resonance-sig-shape, qcom,lra-auto-resonance-mode) and doesn't
-	 * honour top-level brake-pattern (per-effect qcom,wf-brake-pattern only).
+	 * Athena LRA tuning. The 4.4 qpnp-haptic driver read qcom,wave-shape,
+	 * qcom,wave-play-rate-us, qcom,lra-auto-res-mode, qcom,lra-high-z. The
+	 * 4.19 qti-haptics driver uses different names (qcom,play-rate-us,
+	 * qcom,lra-resonance-sig-shape, qcom,lra-auto-resonance-mode). The
+	 * BlackBerry brake configuration is restored by the downstream
+	 * qti-haptics support for top-level brake properties.
 	 *
 	 * The original qcom,wave-shape = "sine" collapses into qti-haptics'
 	 * qcom,lra-resonance-sig-shape which the base pm660.dtsi already sets to
@@ -968,6 +969,84 @@
 			qcom,play-rate-us = <4255>;
 			qcom,lra-auto-resonance-mode = "zxd";
 			/delete-property/ qcom,correct-lra-drive-freq;
+			qcom,en-brake;
+			qcom,brake-pattern = [02 01 00 00];
+
+			/* Athena LRA versions of the framework fallback effects. */
+			wf_0 {
+				/* CLICK: approximately 30 ms at the 235 Hz resonance. */
+				qcom,effect-id = <0>;
+				qcom,wf-vmax-mv = <1740>;
+				qcom,wf-pattern = [
+					3e 3e 3e 3e 3e 3e 3e
+				];
+				qcom,wf-play-rate-us = <4255>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [02 01 00 00];
+			};
+
+			wf_1 {
+				/* DOUBLE_CLICK: 30 ms on, 100 ms off, 30 ms on. */
+				qcom,effect-id = <1>;
+				qcom,wf-vmax-mv = <1740>;
+				qcom,wf-pattern = [
+					3e 3e 3e 3e 3e 3e 3e
+					00 00 00 00 00 00 00 00 00 00 00 00
+					00 00 00 00 00 00 00 00 00 00 00 00
+					3e 3e 3e 3e 3e 3e 3e
+				];
+				qcom,wf-play-rate-us = <4255>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [02 01 00 00];
+			};
+
+			wf_2 {
+				/* TICK: approximately 10 ms at the 235 Hz resonance. */
+				qcom,effect-id = <2>;
+				qcom,wf-vmax-mv = <1740>;
+				qcom,wf-pattern = [3e 3e];
+				qcom,wf-play-rate-us = <4255>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [02 01 00 00];
+			};
+
+			wf_3 {
+				/* THUD has no framework fallback on this device. */
+				qcom,effect-id = <3>;
+				qcom,wf-vmax-mv = <1740>;
+				qcom,wf-pattern = [00];
+				qcom,wf-play-rate-us = <4255>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [00 00 00 00];
+			};
+
+			wf_4 {
+				/* POP has no framework fallback on this device. */
+				qcom,effect-id = <4>;
+				qcom,wf-vmax-mv = <1740>;
+				qcom,wf-pattern = [00];
+				qcom,wf-play-rate-us = <4255>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [00 00 00 00];
+			};
+
+			wf_5 {
+				/* HEAVY_CLICK: legacy 30 ms full-strength pulse. */
+				qcom,effect-id = <5>;
+				qcom,wf-vmax-mv = <1740>;
+				qcom,wf-pattern = [
+					3e 3e 3e 3e 3e 3e 3e
+				];
+				qcom,wf-play-rate-us = <4255>;
+				qcom,wf-repeat-count = <1>;
+				qcom,wf-s-repeat-count = <1>;
+				qcom,wf-brake-pattern = [02 01 00 00];
+			};
 		};
 	};
 	/* MODIFIED-END by qifeng.wu,BUG-5711757*/
