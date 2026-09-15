@@ -85,49 +85,83 @@ static void msg_dma_release(void);
 *  Output: 
 *  Return: 
 *******************************************************************************/
-int fts_i2c_read_universal(struct i2c_client *client, char *writebuf, int writelen, char *readbuf, int readlen)
+int fts_i2c_read_universal(struct i2c_client *client, char *writebuf,
+			   int writelen, char *readbuf, int readlen)
 {
-	int ret = 0;
+	int ret;
+	int expected_msgs;
+	u8 *dma_writebuf = NULL;
+	u8 *dma_readbuf;
+	struct i2c_msg msgs[2];
+
+	if (!client || !client->adapter)
+		return -ENODEV;
+
+	if (writelen < 0 || readlen < 0 ||
+	    (writelen > 0 && !writebuf) ||
+	    (readlen > 0 && !readbuf))
+		return -EINVAL;
+
+	if (readlen == 0)
+		return 0;
+
+	/*
+	 * i2c-msm-v2 may DMA-map both messages when the complete transfer is
+	 * large enough for DMA mode. FocalTech callers may provide stack-backed
+	 * buffers, which are not guaranteed to be DMA-safe, so use kmalloc-backed
+	 * bounce buffers before handing the messages to the adapter.
+	 */
+	if (writelen > 0) {
+		dma_writebuf = kmemdup(writebuf, writelen, GFP_KERNEL);
+		if (!dma_writebuf)
+			return -ENOMEM;
+	}
+
+	dma_readbuf = kmalloc(readlen, GFP_KERNEL);
+	if (!dma_readbuf) {
+		kfree(dma_writebuf);
+		return -ENOMEM;
+	}
+
+	memset(msgs, 0, sizeof(msgs));
+
+	if (writelen > 0) {
+		msgs[0].addr = client->addr;
+		msgs[0].flags = I2C_M_WRITE | I2C_M_DMA_SAFE;
+		msgs[0].len = writelen;
+		msgs[0].buf = dma_writebuf;
+
+		msgs[1].addr = client->addr;
+		msgs[1].flags = I2C_M_RD | I2C_M_DMA_SAFE;
+		msgs[1].len = readlen;
+		msgs[1].buf = dma_readbuf;
+
+		expected_msgs = 2;
+	} else {
+		msgs[0].addr = client->addr;
+		msgs[0].flags = I2C_M_RD | I2C_M_DMA_SAFE;
+		msgs[0].len = readlen;
+		msgs[0].buf = dma_readbuf;
+
+		expected_msgs = 1;
+	}
 
 	mutex_lock(&i2c_rw_access);
 
-	if(readlen > 0)
-	{
-		if (writelen > 0) {
-			struct i2c_msg msgs[] = {
-				{
-					 .addr = client->addr,
-					 .flags = I2C_M_WRITE,
-					 .len = writelen,
-					 .buf = writebuf,
-				 },
-				{
-					 .addr = client->addr,
-					 .flags = I2C_M_RD,
-					 .len = readlen,
-					 .buf = readbuf,
-				 },
-			};
-			ret = i2c_transfer(client->adapter, msgs, 2);
-			if (ret < 0)
-				FTS_COMMON_DBG("i2c read error.");
-		} else {
-			struct i2c_msg msgs[] = {
-				{
-					 .addr = client->addr,
-					 .flags = I2C_M_RD,
-					 .len = readlen,
-					 .buf = readbuf,
-				 },
-			};
-			ret = i2c_transfer(client->adapter, msgs, 1);
-			if (ret < 0)
-				FTS_COMMON_DBG("i2c read error.");
-		}
+	ret = i2c_transfer(client->adapter, msgs, expected_msgs);
+	if (ret == expected_msgs) {
+		memcpy(readbuf, dma_readbuf, readlen);
+	} else if (ret < 0) {
+		FTS_COMMON_DBG("i2c read error.");
+	} else {
+		ret = -EIO;
 	}
 
 	mutex_unlock(&i2c_rw_access);
-	
+
+	kfree(dma_readbuf);
+	kfree(dma_writebuf);
+
 	return ret;
 }
 
@@ -138,29 +172,44 @@ int fts_i2c_read_universal(struct i2c_client *client, char *writebuf, int writel
 *  Output: 
 *  Return: 
 *******************************************************************************/
-int fts_i2c_write_universal(struct i2c_client *client, char *writebuf, int writelen)
+int fts_i2c_write_universal(struct i2c_client *client, char *writebuf,
+			    int writelen)
 {
-	int ret = 0;
+	int ret;
+	u8 *dma_writebuf;
+	struct i2c_msg msg;
 
-	struct i2c_msg msgs[] = {
-		{
-			 .addr = client->addr,
-			 .flags = I2C_M_WRITE,
-			 .len = writelen,
-			 .buf = writebuf,
-		 },
-	};
+	if (!client || !client->adapter)
+		return -ENODEV;
+
+	if (writelen < 0 || (writelen > 0 && !writebuf))
+		return -EINVAL;
+
+	if (writelen == 0)
+		return 0;
+
+	dma_writebuf = kmemdup(writebuf, writelen, GFP_KERNEL);
+	if (!dma_writebuf)
+		return -ENOMEM;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.addr = client->addr;
+	msg.flags = I2C_M_WRITE | I2C_M_DMA_SAFE;
+	msg.len = writelen;
+	msg.buf = dma_writebuf;
+
 	mutex_lock(&i2c_rw_access);
 
-	if(writelen > 0)
-	{
-		ret = i2c_transfer(client->adapter, msgs, 1);
-		if (ret < 0)
-			FTS_COMMON_DBG("i2c write error.");
-	}
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0)
+		FTS_COMMON_DBG("i2c write error.");
+	else if (ret != 1)
+		ret = -EIO;
 
 	mutex_unlock(&i2c_rw_access);
-	
+
+	kfree(dma_writebuf);
+
 	return ret;
 }
 
