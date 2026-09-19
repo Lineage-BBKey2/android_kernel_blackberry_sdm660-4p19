@@ -169,7 +169,9 @@ int fts_platform_data_exit(void)
 	return 0;
 }
 
-static struct regulator* init_regulator(struct device *dev, char* name, int min_uV, int max_uV)
+static struct regulator* init_regulator(struct device *dev, char* name,
+                                       int min_uV, int max_uV,
+                                       bool set_voltage)
 {
 	struct regulator *vreg;
 	int rc;
@@ -179,7 +181,7 @@ static struct regulator* init_regulator(struct device *dev, char* name, int min_
 		ERROR_COMMON_FTS("Regulator get failed %s rc=%d", name, rc);
 		return NULL;
 	}
-	if (regulator_count_voltages(vreg) > 0) {
+	if (set_voltage && regulator_count_voltages(vreg) > 0) {
 		rc = regulator_set_voltage(vreg, min_uV, max_uV);
 		if (rc) {
 			ERROR_COMMON_FTS("Regulator set_vtg failed %s rc=%d", name, rc);
@@ -277,9 +279,34 @@ static int fts_platform_data_parse_dts_file(struct i2c_client *client, struct ft
 	else
 		dev_err(dev, "Unable to get y-resolution ");
 
-	pdata->disp_1p8 = init_regulator(dev, "disp_1p8", VREG_DISP_1P8_VOLTAGE, VREG_DISP_1P8_VOLTAGE);
-	pdata->disp_p5v = init_regulator(dev, "disp_p5v", VREG_LABIBB_VOLTAGE_MIN, VREG_LABIBB_VOLTAGE_MAX);
-	pdata->disp_n5v = init_regulator(dev, "disp_n5v", VREG_LABIBB_VOLTAGE_MIN, VREG_LABIBB_VOLTAGE_MAX);
+	/*
+	 * Preserve the existing platform-configured LCDB bias voltage for disp_p5v
+	 * and disp_n5v.
+	 *
+	 * The kernel 4.4 LCDB regulator did not advertise voltage selectors, so the
+	 * regulator_count_voltages() check prevented this driver from applying its
+	 * 4.6-6.0 V constraint. The kernel 4.19 regulator advertises selectors and
+	 * would otherwise replace the bootloader-configured bias with 4.6 V. On
+	 * affected Athena display assemblies, that lower bias was observed to 
+	 * produce excessive FT8707 virtual-key noise and ghost navigation input.
+	 *
+	 * Continue applying the explicit 1.8 V constraint, but preserve the
+	 * bootloader's LCDB bias configuration.
+	 */
+	pdata->disp_1p8 = init_regulator(dev, "disp_1p8",
+	                                 VREG_DISP_1P8_VOLTAGE,
+	                                 VREG_DISP_1P8_VOLTAGE,
+	                                 true);
+
+	pdata->disp_p5v = init_regulator(dev, "disp_p5v",
+	                                 VREG_LABIBB_VOLTAGE_MIN,
+	                                 VREG_LABIBB_VOLTAGE_MAX,
+	                                 false);
+
+	pdata->disp_n5v = init_regulator(dev, "disp_n5v",
+	                                 VREG_LABIBB_VOLTAGE_MIN,
+	                                 VREG_LABIBB_VOLTAGE_MAX,
+	                                 false);
 
 	/* enable these at init - We assume that LK has turned the display on, and we want to
 	 * explicitly vote the vregs on so that they do not get turned off in the kernel

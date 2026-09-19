@@ -439,7 +439,7 @@
 	/delete-property/interrupt-names;
 	qcom,led-strings-list = [00 01];
 	qcom,string-cfg = <0x3>;
-	qcom,fs-curr-ua = <20000>;
+	qcom,fs-current-limit = <20000>;
 	status = "okay";
 };
 
