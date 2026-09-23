@@ -38,6 +38,9 @@
 #define DP_CRYPTO_CLK_RATE_KHZ 337500
 #define DP_STRING_SIZE		30
 
+#define DP_SINK_COUNT_RETRY_MAX		5
+#define DP_SINK_COUNT_RETRY_DELAY_MS	100
+
 struct mdss_dp_attention_node {
 	u32 vdo;
 	struct list_head list;
@@ -2346,11 +2349,28 @@ end:
 	return ret;
 }
 
+static bool mdss_dp_can_retry_sink_count(struct mdss_dp_drv_pdata *dp)
+{
+	bool retry;
+
+	/*
+	 * A newer Attention VDO supersedes the HPD-high event being handled.
+	 * Leave it queued instead of delaying or processing stale sink state.
+	 */
+	mutex_lock(&dp->attention_lock);
+	retry = dp->cable_connected && list_empty(&dp->attention_head);
+	mutex_unlock(&dp->attention_lock);
+
+	return retry;
+}
+
 static int mdss_dp_process_hpd_high(struct mdss_dp_drv_pdata *dp)
 {
 	int ret;
+	int sink_count_retry = 0;
 	u32 max_pclk_khz;
 
+read_dpcd:
 	pr_debug("start\n");
 
 	ret = mdss_dp_dpcd_cap_read(dp);
@@ -2379,6 +2399,16 @@ static int mdss_dp_process_hpd_high(struct mdss_dp_drv_pdata *dp)
 	 * is not guaranteed to work.
 	 */
 	if (mdss_dp_is_ds_bridge_sink_count_zero(dp)) {
+		if (sink_count_retry < DP_SINK_COUNT_RETRY_MAX &&
+				mdss_dp_can_retry_sink_count(dp)) {
+			sink_count_retry++;
+			pr_info("no downstream devices, retrying DPCD read (%d/%d)\n",
+				sink_count_retry, DP_SINK_COUNT_RETRY_MAX);
+			msleep(DP_SINK_COUNT_RETRY_DELAY_MS);
+			if (mdss_dp_can_retry_sink_count(dp))
+				goto read_dpcd;
+		}
+
 		if (mdss_dp_is_ds_bridge_no_local_edid(dp))
 			pr_debug("No local EDID present on DS branch device\n");
 		pr_info("no downstream devices, skip client notification\n");

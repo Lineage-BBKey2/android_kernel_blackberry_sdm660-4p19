@@ -1540,8 +1540,29 @@ int mdss_mdp_overlay_start(struct msm_fb_data_type *mfd)
 		pr_err("PP resume err %d\n", rc);
 
 	rc = mdss_mdp_splash_cleanup(mfd, true);
-	if (!rc)
-		goto end;
+	if (rc)
+		goto ctl_error;
+
+	/*
+	 * A DTV/pluggable display is only configured in overlay_on(); its
+	 * interface context is created here, when the first frame starts the
+	 * controller.  Restore a pending VSYNC request only after that context
+	 * exists.  Trying to restore it from overlay_on() before ctl_start()
+	 * makes video_add_vsync_handler() fail with -ENODEV after suspend.
+	 */
+	if (mdp5_data->vsync_en && !ctl->vsync_handler.enabled &&
+			ctl->ops.add_vsync_handler) {
+		pr_info("reenabling vsync for fb%d after ctl start\n",
+			mfd->index);
+		rc = ctl->ops.add_vsync_handler(ctl, &ctl->vsync_handler);
+		if (rc) {
+			pr_err("failed to reenable vsync for fb%d, rc=%d\n",
+				mfd->index, rc);
+			goto ctl_error;
+		}
+	}
+
+	goto end;
 
 ctl_error:
 	mdss_mdp_ctl_destroy(ctl);
@@ -5763,14 +5784,18 @@ static int mdss_mdp_overlay_on(struct msm_fb_data_type *mfd)
 	}
 
 panel_on:
-	if (mdp5_data->vsync_en) {
-		if ((ctl) && (ctl->ops.add_vsync_handler)) {
-			pr_info("reenabling vsync for fb%d\n", mfd->index);
-			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
-			rc = ctl->ops.add_vsync_handler(ctl,
-					 &ctl->vsync_handler);
-			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
-		}
+	/*
+	 * ctl_setup() does not create an interface context for DTV/pluggable
+	 * displays.  Their pending VSYNC request is restored by overlay_start()
+	 * after ctl_start() creates the context.
+	 */
+	if (mdp5_data->vsync_en && ctl && ctl->ops.add_vsync_handler &&
+			!ctl->vsync_handler.enabled &&
+			mdss_mdp_ctl_is_power_on(ctl)) {
+		pr_info("reenabling vsync for fb%d\n", mfd->index);
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+		rc = ctl->ops.add_vsync_handler(ctl, &ctl->vsync_handler);
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 	}
 	if (IS_ERR_VALUE((unsigned long) rc)) {
 		pr_err("Failed to turn on fb%d\n", mfd->index);
