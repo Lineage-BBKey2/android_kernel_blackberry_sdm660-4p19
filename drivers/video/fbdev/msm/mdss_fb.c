@@ -28,6 +28,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
+#include <linux/overflow.h>
 #include <linux/proc_fs.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
@@ -3932,6 +3933,20 @@ static int mdss_fb_check_var(struct fb_var_screeninfo *var,
 
 	if ((var->xres == 0) || (var->yres == 0))
 		return -EINVAL;
+
+	/*
+	 * Userspace may change the physical mode without updating the virtual
+	 * resolution. fb_set_var() in newer kernels rejects that request after
+	 * fb_check_var() returns, so keep the MDSS framebuffer geometry valid.
+	 */
+	if (var->xres_virtual < var->xres)
+		var->xres_virtual = var->xres;
+
+	if (var->yres_virtual < var->yres) {
+		if (check_mul_overflow(var->yres, mfd->fb_page,
+				       &var->yres_virtual))
+			return -EINVAL;
+	}
 
 	if (var->xoffset > (var->xres_virtual - var->xres))
 		return -EINVAL;
