@@ -94,7 +94,8 @@ enum {
 	FTS_STATE_ON = 0,
 	FTS_STATE_GESTURE,
 	FTS_STATE_OFF,
-	FTS_STATE_IGNORE_TOUCH
+	FTS_STATE_IGNORE_TOUCH,
+	FTS_STATE_HOST_DT2W
 };
 
 // platform data that can be configured by extern
@@ -181,12 +182,14 @@ extern int fts_platform_data_exit(void);
 extern int fts_hardware_reset(bool level);
 extern void fts_wakeup_gesture_set(bool enabled);
 extern bool fts_wakeup_gesture_read(void);
+extern bool fts_host_dt2w_read(void);
 extern void enable_regulator(struct device *dev, struct regulator *vreg, const char* vreg_name, bool enable);
 //define and implement in focaltech_report.c
 extern int fts_report_init(struct i2c_client *client, void *platform_data);
 extern int fts_report_exit(struct i2c_client *client, void *platform_data);
 extern int fts_report_resume(void);
 extern int fts_report_suspend(void);
+extern int fts_report_host_dt2w_suspend(void);
 
 //define and implement in focaltech_apk_node.c
 extern int fts_apk_node_init(void);
@@ -200,6 +203,8 @@ extern int fts_sysfs_exit(struct i2c_client *client);
 extern int fts_gesture_init(struct input_dev *input_dev);
 extern int fts_gesture_exit(void);
 extern int fts_gesture_handle(void);
+extern void fts_gesture_keep_awake(unsigned int timeout_ms);
+extern void fts_gesture_report_double_tap(void);
 
 //define and implement in focaltech_proximity.c
 extern int fts_touch_proximity_init(void);

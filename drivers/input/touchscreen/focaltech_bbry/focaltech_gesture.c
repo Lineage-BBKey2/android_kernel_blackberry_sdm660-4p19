@@ -197,6 +197,18 @@ static void fts_gesture_report_key(struct input_dev *input_dev, unsigned int cod
 	input_sync(input_dev);
 }
 
+void fts_gesture_keep_awake(unsigned int timeout_ms)
+{
+	if (fts_wakelock)
+		__pm_wakeup_event(fts_wakelock, timeout_ms);
+}
+
+void fts_gesture_report_double_tap(void)
+{
+	__pm_wakeup_event(fts_wakelock, jiffies_to_msecs(1000));
+	fts_gesture_report_key(fts_input_dev, KEY_GESTURE_U);
+}
+
 /*******************************************************************************
 *   Name: fts_gesture_report
 *  Brief:
@@ -223,8 +235,7 @@ static void fts_gesture_report(struct input_dev *input_dev,int gesture_id)
 			fts_gesture_report_key(input_dev, KEY_GESTURE_DOWN);
 			break;
 		case GESTURE_DOUBLECLICK:
-			__pm_wakeup_event(fts_wakelock, jiffies_to_msecs(1000));
-			fts_gesture_report_key(input_dev, KEY_GESTURE_U);
+			fts_gesture_report_double_tap();
 			break;
 		case GESTURE_O:
 			fts_gesture_report_key(input_dev, KEY_GESTURE_O);
@@ -297,4 +308,3 @@ static int fts_gesture_read_data(void)
 		return -1;
 	}
 }
-

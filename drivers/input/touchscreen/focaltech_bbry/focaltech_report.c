@@ -36,6 +36,7 @@
 * 1.Included header files
 *******************************************************************************/
 #include <linux/kthread.h>
+#include <linux/timekeeping.h>
 #include "focaltech_comm.h"
 #include "focaltech_core.h"
 
@@ -104,6 +105,14 @@ enum enum_Queue_Mode
 #define CONTACT_EVENT            2
 #define NO_EVENT              3
 
+#define FTS_HOST_DT2W_MAX_TAP_MS       250
+#define FTS_HOST_DT2W_MIN_GAP_MS        40
+#define FTS_HOST_DT2W_MAX_GAP_MS       500
+#define FTS_HOST_DT2W_MAX_MOVE_SQ    10000
+#define FTS_HOST_DT2W_MAX_DISTANCE_SQ 22500
+#define FTS_HOST_DT2W_MAX_SPLIT_SQ    14400
+#define FTS_HOST_DT2W_WAKE_HOLD_MS      1000
+
 
 #if defined(CONFIG_TCT_SDM660_COMMON)
 /* Scale the keys x pos to the finale driver's scale */
@@ -138,8 +147,30 @@ static int g_waitqueue_flag = 0;
 static DECLARE_WAIT_QUEUE_HEAD(g_waitqueue_touch_event);
 static struct task_struct *g_tsk_touch_event;
 
-// wherher enter suspend mode
-static int g_is_suspend_mode = 0;//0: no, 1: yes
+enum fts_report_mode {
+	FTS_REPORT_MODE_ACTIVE = 0,
+	FTS_REPORT_MODE_GESTURE,
+	FTS_REPORT_MODE_HOST_DT2W,
+};
+
+static int g_report_mode = FTS_REPORT_MODE_ACTIVE;
+
+struct fts_host_dt2w_state {
+	bool touch_active;
+	bool touch_valid;
+	bool block_until_release;
+	bool first_tap_valid;
+	bool wake_sent;
+	u8 finger_id;
+	u16 start_x;
+	u16 start_y;
+	u16 first_x;
+	u16 first_y;
+	u64 touch_start_ms;
+	u64 first_up_ms;
+};
+
+static struct fts_host_dt2w_state g_host_dt2w;
 
 /*******************************************************************************
 * Global variable or extern global variabls/functions
@@ -168,6 +199,8 @@ static int fts_wait_queue_exit(void);
 static int fts_wait_queue_handle(void);
 static int fts_wait_queue_touch_event(void *unused);
 static int fts_read_touch_data(struct ts_event *data);
+static void fts_host_dt2w_reset(void);
+static void fts_host_dt2w_handle_frame(struct ts_event *data);
 
 #ifdef CONFIG_CKB_MASK_KEY
 static bool btn_mask_on = false;
@@ -333,7 +366,7 @@ int fts_report_init(struct i2c_client *client, void *platform_data)
 		return err;
 #endif
 	//init suspend mode
-	g_is_suspend_mode = 0;
+	g_report_mode = FTS_REPORT_MODE_ACTIVE;
 
 	return 0;
 }
@@ -365,13 +398,22 @@ int fts_report_exit(struct i2c_client *client, void *platform_data)
 }
 int fts_report_resume(void)
 {
-	g_is_suspend_mode = 0;
+	fts_host_dt2w_reset();
+	g_report_mode = FTS_REPORT_MODE_ACTIVE;
 	return 0;
 }
 
 int fts_report_suspend(void)
 {
-	g_is_suspend_mode = 1;
+	fts_host_dt2w_reset();
+	g_report_mode = FTS_REPORT_MODE_GESTURE;
+	return 0;
+}
+
+int fts_report_host_dt2w_suspend(void)
+{
+	fts_host_dt2w_reset();
+	g_report_mode = FTS_REPORT_MODE_HOST_DT2W;
 	return 0;
 }
 static int fts_irq_init(struct i2c_client *client, void *platform_data)
@@ -415,6 +457,15 @@ static irqreturn_t fts_irq_handle(int irq, void *dev_id)
 
 	if (fts_ignore_irq)
 		return IRQ_HANDLED;
+	if (FTS_REPORT_MODE_HOST_DT2W == g_report_mode) {
+		/*
+		 * The IRQ wakes the SoC from deep suspend, but without a timed
+		 * wakeup source it can suspend again between frames or between the
+		 * two physical taps.  Keep it awake only while a host-recognized
+		 * gesture may still be in progress.
+		 */
+		fts_gesture_keep_awake(FTS_HOST_DT2W_WAKE_HOLD_MS);
+	}
 
 	if(QUEUE_MODE_OF_TOUCH_HANDLE == WAIT_QUEUE)
 	{
@@ -1031,9 +1082,17 @@ static int fts_work_queue_exit(void)
 	struct ts_event pevent;
 	int ret = 0;
 	/*is it gesture event?*/
-	if(1 == g_is_suspend_mode)
+	if (FTS_REPORT_MODE_GESTURE == g_report_mode)
 	{
 		fts_gesture_handle();
+		return;
+	}
+
+	if (FTS_REPORT_MODE_HOST_DT2W == g_report_mode)
+	{
+		ret = fts_read_touch_data(&pevent);
+		if (ret == 0)
+			fts_host_dt2w_handle_frame(&pevent);
 		return;
 	}
 
@@ -1111,9 +1170,17 @@ static int fts_wait_queue_exit(void)
 		 set_current_state(TASK_RUNNING);
 
 		 /*is it gesture event?*/
-		if(1 == g_is_suspend_mode)
+		if (FTS_REPORT_MODE_GESTURE == g_report_mode)
 		{
 			fts_gesture_handle();
+			continue;
+		}
+
+		if (FTS_REPORT_MODE_HOST_DT2W == g_report_mode)
+		{
+			ret = fts_read_touch_data(&pevent);
+			if (ret == 0)
+				fts_host_dt2w_handle_frame(&pevent);
 			continue;
 		}
 
@@ -1203,4 +1270,193 @@ static int fts_read_touch_data(struct ts_event *data)
 	return 0;
 }
 
+static u32 fts_host_dt2w_distance_sq(u16 x1, u16 y1, u16 x2, u16 y2)
+{
+	s32 dx = (s32)x1 - (s32)x2;
+	s32 dy = (s32)y1 - (s32)y2;
 
+	return dx * dx + dy * dy;
+}
+
+static void fts_host_dt2w_reset(void)
+{
+	memset(&g_host_dt2w, 0, sizeof(g_host_dt2w));
+}
+
+static void fts_host_dt2w_accept_tap(u16 x, u16 y, u64 down_ms,
+		u64 up_ms)
+{
+	u64 gap_ms;
+	u32 distance_sq;
+
+	if (g_host_dt2w.first_tap_valid &&
+	    down_ms >= g_host_dt2w.first_up_ms) {
+		gap_ms = down_ms - g_host_dt2w.first_up_ms;
+		distance_sq = fts_host_dt2w_distance_sq(x, y,
+			g_host_dt2w.first_x, g_host_dt2w.first_y);
+
+		if (gap_ms >= FTS_HOST_DT2W_MIN_GAP_MS &&
+		    gap_ms <= FTS_HOST_DT2W_MAX_GAP_MS &&
+		    distance_sq <= FTS_HOST_DT2W_MAX_DISTANCE_SQ) {
+			g_host_dt2w.first_tap_valid = false;
+			g_host_dt2w.wake_sent = true;
+			fts_gesture_report_double_tap();
+			return;
+		}
+
+		/* A sub-40 ms gap is indistinguishable from split-contact bounce. */
+		if (gap_ms < FTS_HOST_DT2W_MIN_GAP_MS)
+			return;
+	}
+
+	g_host_dt2w.first_tap_valid = true;
+	g_host_dt2w.first_x = x;
+	g_host_dt2w.first_y = y;
+	g_host_dt2w.first_up_ms = up_ms;
+}
+
+static void fts_host_dt2w_handle_frame(struct ts_event *data)
+{
+	u64 now_ms = ktime_to_ms(ktime_get_boottime());
+	u8 active_points = 0;
+	int first_active_index = -1;
+	int second_active_index = -1;
+	int active_index = -1;
+	int tracked_index = -1;
+	int i;
+	bool split_contact = false;
+	u8 event;
+	u16 x;
+	u16 y;
+	u32 split_distance_sq;
+	u64 duration_ms;
+
+	if (g_host_dt2w.wake_sent)
+		return;
+
+	/*
+	 * touch_point counts every record returned by the controller, including
+	 * UP records retained alongside a new DOWN record.  Count only active
+	 * DOWN/CONTACT records when deciding whether this is multitouch.
+	 */
+	for (i = 0; i < data->touch_point; i++) {
+		event = data->au8_touch_event[i];
+		if (event == DOWN_EVENT || event == CONTACT_EVENT) {
+			if (active_points == 0)
+				first_active_index = i;
+			else if (active_points == 1)
+				second_active_index = i;
+			active_points++;
+			active_index = i;
+		}
+
+		if (g_host_dt2w.touch_active &&
+		    data->au8_finger_id[i] == g_host_dt2w.finger_id)
+			tracked_index = i;
+	}
+
+	/*
+	 * Some affected FT8707 panels split one physical fingertip into two
+	 * nearby IDs.  Coalesce only an exact two-point cluster no wider than
+	 * 120 pixels.  Preserve the already-tracked ID when it is still active.
+	 */
+	if (data->touch_point_num == 2 && active_points == 2) {
+		split_distance_sq = fts_host_dt2w_distance_sq(
+			data->au16_x[first_active_index],
+			data->au16_y[first_active_index],
+			data->au16_x[second_active_index],
+			data->au16_y[second_active_index]);
+		if (split_distance_sq <= FTS_HOST_DT2W_MAX_SPLIT_SQ) {
+			split_contact = true;
+			if (tracked_index >= 0 &&
+			    (data->au8_touch_event[tracked_index] == DOWN_EVENT ||
+			     data->au8_touch_event[tracked_index] == CONTACT_EVENT))
+				active_index = tracked_index;
+			else
+				active_index = first_active_index;
+			active_points = 1;
+		}
+	}
+
+	if ((data->touch_point_num > 1 && !split_contact) ||
+	    active_points > 1) {
+		g_host_dt2w.block_until_release = true;
+		g_host_dt2w.touch_active = false;
+		g_host_dt2w.touch_valid = false;
+		g_host_dt2w.first_tap_valid = false;
+		return;
+	}
+
+	if (g_host_dt2w.block_until_release) {
+		if (data->touch_point_num == 0 && active_points == 0)
+			g_host_dt2w.block_until_release = false;
+		return;
+	}
+
+	if (g_host_dt2w.touch_active && tracked_index >= 0) {
+		event = data->au8_touch_event[tracked_index];
+		x = data->au16_x[tracked_index];
+		y = data->au16_y[tracked_index];
+		if (x >= fts_platform_data->x_resolution_max ||
+		    y >= fts_platform_data->y_resolution_max ||
+		    fts_host_dt2w_distance_sq(x, y,
+			g_host_dt2w.start_x,
+			g_host_dt2w.start_y) > FTS_HOST_DT2W_MAX_MOVE_SQ)
+			g_host_dt2w.touch_valid = false;
+
+		if (event == UP_EVENT) {
+			duration_ms = now_ms - g_host_dt2w.touch_start_ms;
+			if (g_host_dt2w.touch_valid &&
+			    duration_ms <= FTS_HOST_DT2W_MAX_TAP_MS) {
+				fts_host_dt2w_accept_tap(
+					g_host_dt2w.start_x,
+					g_host_dt2w.start_y,
+					g_host_dt2w.touch_start_ms,
+					now_ms);
+			} else {
+				g_host_dt2w.first_tap_valid = false;
+			}
+
+			g_host_dt2w.touch_active = false;
+			g_host_dt2w.touch_valid = false;
+		}
+	} else if (g_host_dt2w.touch_active && active_points == 0 &&
+		   data->touch_point_num == 0) {
+		/* A release without the tracked UP record cannot form a tap. */
+		g_host_dt2w.touch_active = false;
+		g_host_dt2w.touch_valid = false;
+	} else if (g_host_dt2w.touch_active && tracked_index < 0) {
+		/* The controller replaced the tracked ID without releasing it. */
+		g_host_dt2w.touch_active = false;
+		g_host_dt2w.touch_valid = false;
+		g_host_dt2w.first_tap_valid = false;
+	}
+
+	/*
+	 * An UP record for the previous contact may share this frame with a new
+	 * active record.  Start the new contact after finishing the old one.
+	 *
+	 * A host-DT2W IRQ may have to resume the SoC from deep suspend.  By the
+	 * time the threaded handler can read the controller, the initial DOWN
+	 * record may already have advanced to CONTACT.  Treat one otherwise
+	 * valid CONTACT as a truncated beginning so the remaining CONTACT/UP
+	 * frames can still form a tap.  This applies to either physical tap;
+	 * requiring a later UP and a separate second tap retains the safety checks.
+	 */
+	if (!g_host_dt2w.touch_active && active_points == 1 &&
+	    (data->au8_touch_event[active_index] == DOWN_EVENT ||
+	     data->au8_touch_event[active_index] == CONTACT_EVENT)) {
+		x = data->au16_x[active_index];
+		y = data->au16_y[active_index];
+		g_host_dt2w.touch_active = true;
+		g_host_dt2w.touch_valid =
+			((data->touch_point_num == 1 || split_contact) &&
+			 x < fts_platform_data->x_resolution_max &&
+			 y < fts_platform_data->y_resolution_max);
+		g_host_dt2w.finger_id =
+			data->au8_finger_id[active_index];
+		g_host_dt2w.start_x = x;
+		g_host_dt2w.start_y = y;
+		g_host_dt2w.touch_start_ms = now_ms;
+	}
+}

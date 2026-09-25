@@ -350,8 +350,14 @@ static int fb_notifier_callback(struct notifier_block *self,
 				usleep(15000);
 				fts_ignore_irq = false;
 				fts_irq_enable(true);
-			} else if (fts_platform_data->state == FTS_STATE_GESTURE) {
-				INFO_COMMON_FTS("gesture --> on");
+			} else if (fts_platform_data->state == FTS_STATE_GESTURE ||
+				   fts_platform_data->state == FTS_STATE_HOST_DT2W) {
+				if (fts_platform_data->state == FTS_STATE_HOST_DT2W) {
+					INFO_COMMON_FTS("host DT2W --> on");
+					fts_ignore_irq = true;
+				} else {
+					INFO_COMMON_FTS("gesture --> on");
+				}
 				disable_irq_wake(fts_i2c_client->irq);
 				fts_report_suspend();
 				usleep(1000);
@@ -359,6 +365,8 @@ static int fb_notifier_callback(struct notifier_block *self,
 				usleep(1000);
 				gpio_direction_output(fts_platform_data->reset_gpio, 1);
 				fts_report_resume();
+				if (fts_platform_data->state == FTS_STATE_HOST_DT2W)
+					fts_ignore_irq = false;
 			} else if (fts_platform_data->state == FTS_STATE_IGNORE_TOUCH) {
 				INFO_COMMON_FTS("ignore touch --> on");
 				fts_irq_enable(true);
@@ -377,18 +385,31 @@ static int fb_notifier_callback(struct notifier_block *self,
 			}
 			fts_release_all_touch();
 			if (fts_platform_data->tap_to_wake_enabled) {
-				INFO_COMMON_FTS("on --> gesture");
-				fts_report_suspend();
+				bool host_dt2w = fts_host_dt2w_read();
+
+				if (host_dt2w) {
+					INFO_COMMON_FTS("on --> host DT2W");
+					fts_ignore_irq = true;
+					fts_report_host_dt2w_suspend();
+				} else {
+					INFO_COMMON_FTS("on --> gesture");
+					fts_report_suspend();
+				}
 				gpio_direction_output(fts_platform_data->disp_rst_n_gpio, 1);
 				usleep(1000);
 				gpio_direction_output(fts_platform_data->disp_rst_n_gpio, 0);
 				usleep(1000);
 				gpio_direction_output(fts_platform_data->disp_rst_n_gpio, 1);
 				usleep(120000);
-				fts_write_reg(0xD1, 0x10);  // enable double-tap
-				fts_write_reg(0xD0, 0x01);  // enable gesture mode
+				if (!host_dt2w) {
+					fts_write_reg(0xD1, 0x10);  // enable double-tap
+					fts_write_reg(0xD0, 0x01);  // enable gesture mode
+				}
 				enable_irq_wake(fts_i2c_client->irq);
-				fts_platform_data->state = FTS_STATE_GESTURE;
+				fts_platform_data->state = host_dt2w ?
+					FTS_STATE_HOST_DT2W : FTS_STATE_GESTURE;
+				if (host_dt2w)
+					fts_ignore_irq = false;
 			} else {
 				INFO_COMMON_FTS("on --> off");
 				if (fts_platform_data->state == FTS_STATE_IGNORE_TOUCH || fts_platform_data->state == FTS_STATE_OFF) {

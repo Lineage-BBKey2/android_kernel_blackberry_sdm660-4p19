@@ -54,6 +54,7 @@
 * Static variables
 *******************************************************************************/
 static bool fts_buttons_enabled = true;
+static bool fts_host_dt2w_enabled;
 
 /*******************************************************************************
 * Global variable or extern global variabls/functions
@@ -61,6 +62,11 @@ static bool fts_buttons_enabled = true;
 bool fts_get_buttons_enabled(void)
 {
 	return fts_buttons_enabled;
+}
+
+bool fts_host_dt2w_read(void)
+{
+	return fts_host_dt2w_enabled;
 }
 
 /*******************************************************************************
@@ -477,6 +483,27 @@ static ssize_t fts_wakeup_gesture_store(struct device *dev, struct device_attrib
 	return count;
 }
 
+static ssize_t fts_host_dt2w_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%u\n", fts_host_dt2w_enabled);
+}
+
+static ssize_t fts_host_dt2w_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int input;
+
+	if (sscanf(buf, "%u", &input) != 1)
+		return -EINVAL;
+
+	fts_host_dt2w_enabled = (input != 0);
+	INFO_COMMON_FTS("HOST-DT2W compatibility mode=%u",
+			fts_host_dt2w_enabled);
+
+	return count;
+}
+
 #if 0
 /************************************************************************
 * Name: fts_fts_get_project_code_show
@@ -626,6 +653,8 @@ static struct attribute_group fts_attribute_group = {
 };
 
 static DEVICE_ATTR(gesture_enable, 0664, fts_wakeup_gesture_show, fts_wakeup_gesture_store);
+/* Host-side DT2W compatibility mode. This is disabled by default. */
+static DEVICE_ATTR(host_dt2w_enable, 0664, fts_host_dt2w_show, fts_host_dt2w_store);
 static DEVICE_ATTR(button_enable, 0664, fts_buttons_enabled_show, fts_buttons_enabled_store);
 static struct class * tp_device_class;
 static struct device * tp_gesture_dev;
@@ -646,6 +675,11 @@ static void tp_class_device_register(void)
 	rc = device_create_file(tp_gesture_dev, &dev_attr_gesture_enable);
 	if ( rc < 0)
 		pr_err("Failed to create device file(%s)!\n", dev_attr_gesture_enable.attr.name);
+
+	rc = device_create_file(tp_gesture_dev, &dev_attr_host_dt2w_enable);
+	if (rc < 0)
+		pr_err("Failed to create device file(%s)!\n",
+			dev_attr_host_dt2w_enable.attr.name);
 
 	tp_button_dev = device_create(tp_device_class, NULL, 0, NULL, "tp_button");
 	if (IS_ERR(tp_button_dev))
