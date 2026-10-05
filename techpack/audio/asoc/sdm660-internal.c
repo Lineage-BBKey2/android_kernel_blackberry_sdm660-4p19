@@ -1387,6 +1387,11 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 
 	snd_soc_dapm_sync(dapm);
 
+	if (gpio_is_valid(pdata->hph_ext_pa_gpio) ||
+	    pdata->hph_ext_pa_gpio_p)
+		msm_anlg_cdc_hph_ext_switch_cb(msm_config_hph_ext_switch,
+					       ana_cdc);
+
 	msm_anlg_cdc_spk_ext_pa_cb(enable_spk_ext_pa, ana_cdc);
 	msm_dig_cdc_hph_comp_cb(msm_config_hph_compander_gpio, dig_cdc);
 

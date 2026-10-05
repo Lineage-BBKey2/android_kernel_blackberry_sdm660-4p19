@@ -349,6 +349,25 @@ void msm_anlg_cdc_spk_ext_pa_cb(
 }
 EXPORT_SYMBOL(msm_anlg_cdc_spk_ext_pa_cb);
 
+void msm_anlg_cdc_hph_ext_switch_cb(
+		int (*codec_hph_ext_switch)(
+			struct snd_soc_component *component, int enable),
+		struct snd_soc_component *component)
+{
+	struct sdm660_cdc_priv *sdm660_cdc;
+
+	if (!component) {
+		pr_err("%s: NULL codec pointer!\n", __func__);
+		return;
+	}
+
+	sdm660_cdc = snd_soc_component_get_drvdata(component);
+
+	dev_dbg(component->dev, "%s: Enter\n", __func__);
+	sdm660_cdc->codec_hph_switch_cb = codec_hph_ext_switch;
+}
+EXPORT_SYMBOL(msm_anlg_cdc_hph_ext_switch_cb);
+
 static void msm_anlg_cdc_compute_impedance(struct snd_soc_component *component,
 						s16 l, s16 r,
 						uint32_t *zl, uint32_t *zr,
@@ -2168,6 +2187,9 @@ static const struct snd_kcontrol_new lo_mux[] = {
 	SOC_DAPM_ENUM("LINE_OUT", lo_enum)
 };
 
+static const struct snd_kcontrol_new ext_hph_mux =
+	SOC_DAPM_ENUM("Ext HPH Switch Mux", ext_spk_enum);
+
 static void msm_anlg_cdc_codec_enable_adc_block(
 				struct snd_soc_component *component,
 				int enable)
@@ -3124,6 +3146,10 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"Ext Spk Switch", "On", "HPHL PA"},
 	{"Ext Spk Switch", "On", "HPHR PA"},
 
+	{"Ext HPH", NULL, "Ext HPH Switch"},
+	{"Ext HPH Switch", "On", "HPHL PA"},
+	{"Ext HPH Switch", "On", "HPHR PA"},
+
 	{"HPHL PA", NULL, "HPHL"},
 	{"HPHR PA", NULL, "HPHR"},
 	{"HPHL", "Switch", "HPHL DAC"},
@@ -3381,6 +3407,37 @@ static int msm_anlg_cdc_codec_enable_spk_ext_pa(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int msm_anlg_cdc_codec_enable_hph_ext_switch(
+		struct snd_soc_dapm_widget *w,
+		struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_component *component =
+				snd_soc_dapm_to_component(w->dapm);
+	struct sdm660_cdc_priv *sdm660_cdc =
+				snd_soc_component_get_drvdata(component);
+
+	dev_dbg(component->dev, "%s: %s event = %d\n",
+		__func__, w->name, event);
+
+	switch (event) {
+	case SND_SOC_DAPM_POST_PMU:
+		dev_dbg(component->dev,
+			"%s: enable external hph switch\n", __func__);
+		if (sdm660_cdc->codec_hph_switch_cb)
+			sdm660_cdc->codec_hph_switch_cb(component, 1);
+		break;
+
+	case SND_SOC_DAPM_PRE_PMD:
+		dev_dbg(component->dev,
+			"%s: disable external hph switch\n", __func__);
+		if (sdm660_cdc->codec_hph_switch_cb)
+			sdm660_cdc->codec_hph_switch_cb(component, 0);
+		break;
+	}
+
+	return 0;
+}
+
 static int msm_anlg_cdc_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 					    struct snd_kcontrol *kcontrol,
 					    int event)
@@ -3489,6 +3546,7 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 	SND_SOC_DAPM_MUX("RDAC2 MUX", SND_SOC_NOPM, 0, 0, &rdac2_mux),
 	SND_SOC_DAPM_MUX("WSA Spk Switch", SND_SOC_NOPM, 0, 0, wsa_spk_mux),
 	SND_SOC_DAPM_MUX("Ext Spk Switch", SND_SOC_NOPM, 0, 0, &ext_spk_mux),
+	SND_SOC_DAPM_MUX("Ext HPH Switch", SND_SOC_NOPM, 0, 0, &ext_hph_mux),
 	SND_SOC_DAPM_MUX("LINE_OUT", SND_SOC_NOPM, 0, 0, lo_mux),
 	SND_SOC_DAPM_MUX("ADC2 MUX", SND_SOC_NOPM, 0, 0, &tx_adc2_mux),
 
@@ -3513,6 +3571,8 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 		SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_SPK("Ext Spk", msm_anlg_cdc_codec_enable_spk_ext_pa),
+
+	SND_SOC_DAPM_SPK("Ext HPH", msm_anlg_cdc_codec_enable_hph_ext_switch),
 
 	SND_SOC_DAPM_SWITCH("ADC1_INP1", SND_SOC_NOPM, 0, 0,
 			    &adc1_switch),

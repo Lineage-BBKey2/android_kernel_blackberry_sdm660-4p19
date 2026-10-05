@@ -5459,7 +5459,7 @@ static const struct of_device_id sdm660_asoc_machine_of_match[]  = {
 	{},
 };
 
-static int msm_config_hph_ext_switch(struct snd_soc_component *component,
+int msm_config_hph_ext_switch(struct snd_soc_component *component,
 				     int enable)
 {
 	struct msm_asoc_mach_data *pdata =
