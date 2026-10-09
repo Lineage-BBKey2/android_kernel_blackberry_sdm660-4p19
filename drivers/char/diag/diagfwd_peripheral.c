@@ -606,10 +606,18 @@ static void diagfwd_data_read_untag_done(struct diagfwd_info *fwd_info,
 			diagfwd_data_process_done(fwd_info,
 				temp_fwdinfo_cpd, len_cpd);
 		} else {
-			if (flag_buf_1)
-				fwd_info->cpd_len_1 = 0;
-			if (flag_buf_2)
-				fwd_info->cpd_len_2 = 0;
+			/*
+			 * No root payload was submitted to the mux, so there
+			 * will be no root write completion to recycle this
+			 * buffer. write_done keeps it busy if user PD writes
+			 * are still pending, otherwise it releases it now.
+			 */
+			if (temp_fwdinfo_cpd) {
+				diagfwd_write_done(peripheral, fwd_info->type,
+					GET_BUF_NUM(temp_fwdinfo_cpd->ctxt));
+			} else {
+				diagfwd_queue_read(fwd_info);
+			}
 		}
 	} else {
 		diagfwd_data_read_done(fwd_info, buf, len);
