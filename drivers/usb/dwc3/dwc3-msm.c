@@ -47,7 +47,7 @@
 #include "debug.h"
 #include "xhci.h"
 
-static bool bc12_compliance;
+static bool bc12_compliance = true;
 module_param(bc12_compliance, bool, 0644);
 MODULE_PARM_DESC(bc12_compliance, "Disable sending dp pulse for CDP");
 
