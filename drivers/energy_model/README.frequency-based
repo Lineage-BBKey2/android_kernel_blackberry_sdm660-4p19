@@ -1,0 +1,28 @@
+Frequency-based tables for the legacy device-tree Energy Model loader
+===================================================================
+
+A CPU node references a cost node using the existing sched-energy-costs
+phandle. By default, busy-cost-data contains <capacity power> pairs; the
+legacy loader scales capacity to CPUFreq frequencies as before.
+
+Optional property on the referenced cost node:
+
+- frequency-based: boolean. busy-cost-data instead contains <frequency power>
+  pairs, with frequency in kHz and the existing per-CPU power estimates.
+
+For frequency-based tables, the loader keeps only entries present in the
+policy CPUFreq table within its hardware min/max range. It preserves the
+frequency and associated power, without rescaling. The data must be sorted
+by strictly increasing frequency and cover every supported CPUFreq state.
+An incomplete model is rejected rather than silently rescaled or guessed.
+The input may contain a union of frequency plans for several speed bins.
+
+Example:
+
+    CPU_COST_0: core-cost0 {
+        frequency-based;
+        busy-cost-data = <633600 41 902400 70 1113600 83>;
+    };
+
+The new property does not change the CPUFreq plan, clocks, voltages, CPU
+capacity, or power estimates. Tables without it retain the legacy behavior.

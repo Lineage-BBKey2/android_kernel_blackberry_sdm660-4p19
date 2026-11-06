@@ -58,6 +58,56 @@ static int get_power(unsigned long *mW, unsigned long *KHz, int cpu)
 	return 0;
 }
 
+/* Select frequency/power pairs without normalizing their frequencies. */
+static int select_frequency_states(struct cpufreq_policy *policy,
+				   struct em_state *em, unsigned long *nstates)
+{
+	struct cpufreq_frequency_table *pos;
+	unsigned long previous = 0, count = 0;
+	unsigned long i;
+
+	if (!policy->freq_table || !*nstates)
+		return -EINVAL;
+
+	for (i = 0; i < *nstates; i++) {
+		if (!em[i].capacity || em[i].capacity <= previous)
+			return -EINVAL;
+		previous = em[i].capacity;
+
+		cpufreq_for_each_valid_entry(pos, policy->freq_table) {
+			if (pos->frequency < policy->cpuinfo.min_freq ||
+			    pos->frequency > policy->cpuinfo.max_freq)
+				continue;
+			if (pos->frequency != em[i].capacity)
+				continue;
+
+			em[count] = em[i];
+			em[count].frequency = em[i].capacity;
+			count++;
+			break;
+		}
+	}
+
+	/* Never register an incomplete or guessed power model for this policy. */
+	if (!count || em[0].frequency != policy->cpuinfo.min_freq ||
+	    em[count - 1].frequency != policy->cpuinfo.max_freq)
+		return -EINVAL;
+
+	cpufreq_for_each_valid_entry(pos, policy->freq_table) {
+		if (pos->frequency < policy->cpuinfo.min_freq ||
+		    pos->frequency > policy->cpuinfo.max_freq)
+			continue;
+		for (i = 0; i < count; i++)
+			if (em[i].frequency == pos->frequency)
+				break;
+		if (i == count)
+			return -EINVAL;
+	}
+
+	*nstates = count;
+	return 0;
+}
+
 static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 			       void *data)
 {
@@ -107,14 +157,15 @@ static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 	}
 
 	prop = of_find_property(cp, "busy-cost-data", NULL);
-	if (!prop || !prop->value) {
+	if (!prop || !prop->value || prop->length < 2 * sizeof(u32) ||
+	    prop->length % (2 * sizeof(u32))) {
 		pr_err("No busy-cost-data for CPU%d\n", cpu);
 		ret = -ENODEV;
 		goto unlock;
 	}
 
 	nstates = (prop->length / sizeof(u32)) / 2;
-	em = kcalloc(nstates, sizeof(struct em_cap_state), GFP_KERNEL);
+	em = kcalloc(nstates, sizeof(*em), GFP_KERNEL);
 	if (!em) {
 		ret = -ENOMEM;
 		goto unlock;
@@ -126,18 +177,28 @@ static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 		em[i].power = be32_to_cpup(tmp++);
 	}
 
-	/* Get the CPU capacity (according to the EM) */
-	scale_cpu = em[nstates - 1].capacity;
-	if (!scale_cpu) {
-		pr_err("CPU%d: capacity cannot be 0\n", cpu);
-		kfree(em);
-		ret = -EINVAL;
-		goto unlock;
-	}
+	if (of_property_read_bool(cp, "frequency-based")) {
+		ret = select_frequency_states(policy, em, &nstates);
+		if (ret) {
+			pr_err("CPU%d: frequency-based EM does not match CPUFreq\n",
+			       cpu);
+			kfree(em);
+			goto unlock;
+		}
+	} else {
+		/* Get the CPU capacity (according to the EM) */
+		scale_cpu = em[nstates - 1].capacity;
+		if (!scale_cpu) {
+			pr_err("CPU%d: capacity cannot be 0\n", cpu);
+			kfree(em);
+			ret = -EINVAL;
+			goto unlock;
+		}
 
-	/* Re-compute the intermediate frequencies based on the EM. */
-	for (i = 0; i < nstates; i++)
-		em[i].frequency = em[i].capacity * max_freq / scale_cpu;
+		/* Re-compute the intermediate frequencies based on the EM. */
+		for (i = 0; i < nstates; i++)
+			em[i].frequency = em[i].capacity * max_freq / scale_cpu;
+	}
 
 	/* Assign the table to all CPUs of this policy. */
 	for_each_cpu(i, policy->cpus) {

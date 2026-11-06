@@ -246,10 +246,16 @@
 		};
 	};
 
+	/*
+	 * These costs use frequency in kHz, not normalized CPU capacity.
+	 * The loader selects the CPUFreq states for the fused speed bin and
+	 * keeps each frequency paired with its original power estimate.
+	 */
 	energy_costs: energy-costs {
 		compatible = "sched-energy";
 
 		CPU_COST_0: core-cost0 {
+			frequency-based;
 			busy-cost-data = <
 				633600	41
 				902400	70
@@ -263,6 +269,7 @@
 		};
 
 		CPU_COST_1: core-cost1 {
+			frequency-based;
 			busy-cost-data = <
 				1113600	307
 				1401600	485
