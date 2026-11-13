@@ -5077,12 +5077,16 @@ static int q6afe_send_enc_config(u16 port_id,
 	struct afe_enc_dec_imc_info_param_t imc_info_param;
 	struct asm_aac_frame_size_control_t frame_ctl_param;
 	struct afe_port_media_type_t media_type;
+#ifndef CONFIG_ARCH_SDM660
 	struct aptx_channel_mode_param_t channel_mode_param;
+#endif
 	struct afe_matched_port_t matched_port_param;
 	struct asm_aptx_ad_speech_mode_cfg_t speech_codec_init_param;
 	struct param_hdr_v3 param_hdr;
 	int ret;
+#ifndef CONFIG_ARCH_SDM660
 	uint32_t frame_size_ctl_value_v2;
+#endif
 
 	pr_debug("%s:update DSP for enc format = %d\n", __func__, format);
 
@@ -5146,6 +5150,23 @@ static int q6afe_send_enc_config(u16 port_id,
 		enc_blk_param.enc_cfg_blk_size =
 			sizeof(union afe_enc_config_data);
 	}
+#ifdef CONFIG_ARCH_SDM660
+	/* Keep legacy codec payloads independent of newer members of the union. */
+	if (format == ASM_MEDIA_FMT_SBC || format == ASM_MEDIA_FMT_AAC_V2 ||
+	    format == ASM_MEDIA_FMT_APTX || format == ASM_MEDIA_FMT_APTX_HD) {
+		u32 legacy = sizeof(struct asm_sbc_enc_cfg_t);
+
+		if (sizeof(struct asm_aptx_enc_cfg_t) > legacy)
+			legacy = sizeof(struct asm_aptx_enc_cfg_t);
+		if (format == ASM_MEDIA_FMT_AAC_V2)
+			legacy = sizeof(struct asm_aac_enc_cfg_v2_t);
+		enc_blk_param.enc_cfg_blk_size = legacy;
+		param_hdr.param_size = sizeof(enc_blk_param.enc_cfg_blk_size) +
+				       legacy;
+		pr_info("%s: SDM660 legacy encoder fmt 0x%x size %u param_size %u\n",
+			__func__, format, legacy, param_hdr.param_size);
+	}
+#endif
 	pr_debug("%s:send AFE_ENCODER_PARAM_ID_ENC_CFG_BLK to DSP payload\n",
 		 __func__);
 	param_hdr.param_id = AFE_ENCODER_PARAM_ID_ENC_CFG_BLK;
@@ -5160,6 +5181,8 @@ static int q6afe_send_enc_config(u16 port_id,
 		goto exit;
 	}
 
+#ifndef CONFIG_ARCH_SDM660
+	/* The retail SDM660 DSP does not implement AAC frame controls. */
 	if (format == ASM_MEDIA_FMT_AAC_V2) {
 		uint32_t frame_size_ctl_value = enc_blk_param.enc_blk_config.
 				aac_config.frame_ctl.ctl_value;
@@ -5208,6 +5231,9 @@ static int q6afe_send_enc_config(u16 port_id,
 		}
 	}
 
+#endif
+
+#ifndef CONFIG_ARCH_SDM660
 	if (format == ASM_MEDIA_FMT_APTX) {
 		pr_debug("%s: sending AFE_PARAM_ID_APTX_SYNC_MODE to DSP",
 			__func__);
@@ -5227,6 +5253,8 @@ static int q6afe_send_enc_config(u16 port_id,
 			goto exit;
 		}
 	}
+#endif
+
 	if (format == ASM_MEDIA_FMT_APTX_ADAPTIVE) {
 		pr_debug("%s: sending AFE_ID_APTX_ADAPTIVE_ENC_INIT to DSP\n",
 			__func__);
@@ -5279,6 +5307,8 @@ static int q6afe_send_enc_config(u16 port_id,
 		goto exit;
 	}
 
+#ifndef CONFIG_ARCH_SDM660
+	/* Scrambling is unsupported; do not send a command just to ignore its error. */
 	if (format != ASM_MEDIA_FMT_APTX_AD_SPEECH) {
 		pr_debug("%s:sending AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING mode= %d to DSP payload\n",
 			  __func__, scrambler_mode);
@@ -5292,12 +5322,14 @@ static int q6afe_send_enc_config(u16 port_id,
 		if (ret) {
 			pr_err("%s: AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING for port 0x%x failed %d\n",
 				__func__, port_id, ret);
-#ifndef CONFIG_ARCH_SDM660
 			goto exit;
-#endif
 		}
 	}
 
+#endif
+
+#ifndef CONFIG_ARCH_SDM660
+	/* The retail SDM660 DSP has no aptX TWS+ mono switch. */
 	if (format == ASM_MEDIA_FMT_APTX) {
 		pr_debug("%s:sending CAPI_V2_PARAM_ID_APTX_ENC_SWITCH_TO_MONO mode= %d to DSP payload\n",
 			__func__, mono_mode);
@@ -5314,6 +5346,8 @@ static int q6afe_send_enc_config(u16 port_id,
 				__func__, port_id, ret);
 		}
 	}
+
+#endif
 
 	if ((format == ASM_MEDIA_FMT_LDAC &&
 	     cfg->ldac_config.abr_config.is_abr_enabled) ||
