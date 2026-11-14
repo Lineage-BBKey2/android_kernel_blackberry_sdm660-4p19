@@ -1062,3 +1062,20 @@
 	};
 };
 /* MODIFIED-END by hongwei.tian,BUG-5849219*/
+
+/* Restore the ACT575 little-cluster calibration for Luna's observed bin 3.
+ * Keep the shared regulator and all other speed bins unchanged.
+ */
+&apc0_pwrcl_vreg {
+	qcom,cpr-closed-loop-voltage-fuse-adjustment =
+		/* Speed bin 0 */
+		<(-32000) (-30000) (-29000) (-23000) (-21000)>,
+		/* Speed bin 1 */
+		<(-32000) (-30000) (-29000) (-23000) (-21000)>,
+		/* Speed bin 2 */
+		<(-32000) (-30000) (-29000) (-23000) (-21000)>,
+		/* Speed bin 3 */
+		<(-32000) (-30000) (-29000) (-38000) (-36000)>,
+		/* Speed bin 4 */
+		<(-32000) (-30000) (-29000) (-23000) (-21000)>;
+};
