@@ -448,6 +448,14 @@ static ssize_t stmpe_keypad_show_counters(struct device *dev,
 	int i;
 	int tot_adjacent = 0;
 	int tot_inadvertent = 0;
+	int keys_pressed;
+	long avg_key_time;
+
+	/* Serialize the read-and-clear operation with normal key processing. */
+	mutex_lock(&keypad->keypad_mutex);
+	keys_pressed = READ_ONCE(keypad->counters.keys_pressed);
+	avg_key_time = keys_pressed > 0 ?
+		keypad->counters.key_time / keys_pressed : 0;
 
 	buf[0] = 0;
 	size += snprintf(buf, PAGE_SIZE, "reset count = %d\n",
@@ -486,7 +494,7 @@ static ssize_t stmpe_keypad_show_counters(struct device *dev,
 			"shortest key press = %ld\n",
 						keypad->counters.low_key_time);
 	size += snprintf(buf + size, PAGE_SIZE - size, "avg key press = %ld\n",
-		(keypad->counters.key_time / keypad->counters.keys_pressed));
+		avg_key_time);
 	size += snprintf(buf + size, PAGE_SIZE - size,
 			"total key time = %ld\n", keypad->counters.key_time);
 
@@ -526,6 +534,7 @@ static ssize_t stmpe_keypad_show_counters(struct device *dev,
 				"%s = %d\n", up_time[i].name, up_time[i].val);
 
 	stmpe_keypad_reset_counters(keypad);
+	mutex_unlock(&keypad->keypad_mutex);
 
 	return size;
 }
