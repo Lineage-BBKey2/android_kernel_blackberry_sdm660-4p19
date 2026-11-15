@@ -318,6 +318,7 @@ static void kgsl_destroy_ion(struct kgsl_memdesc *memdesc)
 	 * doesn't try to free it again
 	 */
 	memdesc->sgt = NULL;
+	entry->priv_data = NULL;
 }
 
 static struct kgsl_memdesc_ops kgsl_dmabuf_ops = {
@@ -3616,6 +3617,14 @@ static uint64_t kgsl_filter_cachemode(uint64_t flags)
 /* The largest allowable alignment for a GPU object is 32MB */
 #define KGSL_MAX_ALIGN (32 * SZ_1M)
 
+unsigned long kgsl_get_align(struct kgsl_memdesc *memdesc)
+{
+	u32 bit = min_t(u32, kgsl_memdesc_get_align(memdesc),
+			ilog2(KGSL_MAX_ALIGN));
+
+	return max_t(unsigned long, 1UL << bit, PAGE_SIZE);
+}
+
 struct kgsl_mem_entry *gpumem_alloc_entry(
 		struct kgsl_device_private *dev_priv,
 		uint64_t size, uint64_t flags)
@@ -4947,7 +4956,7 @@ static unsigned long _get_svm_area(struct kgsl_process_private *private,
 		unsigned long len, unsigned long flags)
 {
 	uint64_t start, end;
-	int align_shift = kgsl_memdesc_get_align(&entry->memdesc);
+	u32 align_shift = kgsl_memdesc_get_align(&entry->memdesc);
 	uint64_t align;
 	unsigned long result;
 	unsigned long addr;
