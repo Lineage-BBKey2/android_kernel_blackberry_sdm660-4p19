@@ -950,9 +950,21 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	gpu_profile = &pwrscale->gpu_profile;
 	profile = &pwrscale->gpu_profile.profile;
 
-	pwr->nb.notifier_call = opp_notify;
+	/* Prepare the queue before acquiring notifier or timer resources. */
+	pwrscale->devfreq_wq = create_freezable_workqueue("kgsl_devfreq_wq");
+	if (!pwrscale->devfreq_wq) {
+		dev_err(device->dev, "Failed to allocate kgsl devfreq workqueue\n");
+		pwrscale->enabled = false;
+		return -ENOMEM;
+	}
+	INIT_WORK(&pwrscale->devfreq_suspend_ws, do_devfreq_suspend);
+	INIT_WORK(&pwrscale->devfreq_resume_ws, do_devfreq_resume);
+	INIT_WORK(&pwrscale->devfreq_notify_ws, do_devfreq_notify);
 
-	dev_pm_opp_register_notifier(dev, &pwr->nb);
+	pwr->nb.notifier_call = opp_notify;
+	ret = dev_pm_opp_register_notifier(dev, &pwr->nb);
+	if (ret)
+		goto err_queue;
 
 	srcu_init_notifier_head(&pwrscale->nh);
 
@@ -1001,6 +1013,8 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 			kgsl_midframe->timer.function =
 					kgsl_pwrscale_midframe_timer;
 			kgsl_midframe->device = device;
+			INIT_WORK(&kgsl_midframe->timer_check_ws,
+				kgsl_pwrscale_midframe_timer_check);
 		} else
 			dev_err(device->dev,
 				     "Failed to enable-midframe-timer feature\n");
@@ -1031,8 +1045,8 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	devfreq = devfreq_add_device(dev, &pwrscale->gpu_profile.profile,
 			governor, pwrscale->gpu_profile.private_data);
 	if (IS_ERR(devfreq)) {
-		device->pwrscale.enabled = false;
-		return PTR_ERR(devfreq);
+		ret = PTR_ERR(devfreq);
+		goto err_notifier;
 	}
 
 	pwrscale->devfreqptr = devfreq;
@@ -1074,14 +1088,6 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	ret = sysfs_create_link(&device->dev->kobj,
 			&devfreq->dev.kobj, "devfreq");
 
-	pwrscale->devfreq_wq = create_freezable_workqueue("kgsl_devfreq_wq");
-	INIT_WORK(&pwrscale->devfreq_suspend_ws, do_devfreq_suspend);
-	INIT_WORK(&pwrscale->devfreq_resume_ws, do_devfreq_resume);
-	INIT_WORK(&pwrscale->devfreq_notify_ws, do_devfreq_notify);
-	if (kgsl_midframe)
-		INIT_WORK(&kgsl_midframe->timer_check_ws,
-				kgsl_pwrscale_midframe_timer_check);
-
 	pwrscale->next_governor_call = ktime_add_us(ktime_get(),
 			KGSL_GOVERNOR_CALL_INTERVAL);
 
@@ -1102,6 +1108,23 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 			"available_governors", "gpu_available_governor");
 
 	return 0;
+
+err_notifier:
+	pwrscale->enabled = false;
+	if (kgsl_midframe)
+		hrtimer_cancel(&kgsl_midframe->timer);
+	dev_pm_opp_unregister_notifier(dev, &pwr->nb);
+	destroy_workqueue(pwrscale->devfreq_wq);
+	pwrscale->devfreq_wq = NULL;
+	kfree(kgsl_midframe);
+	kgsl_midframe = NULL;
+	srcu_cleanup_notifier_head(&pwrscale->nh);
+	return ret;
+err_queue:
+	pwrscale->enabled = false;
+	destroy_workqueue(pwrscale->devfreq_wq);
+	pwrscale->devfreq_wq = NULL;
+	return ret;
 }
 EXPORT_SYMBOL(kgsl_pwrscale_init);
 
@@ -1121,12 +1144,14 @@ void kgsl_pwrscale_close(struct kgsl_device *device)
 	pwrscale = &device->pwrscale;
 	if (!pwrscale->devfreqptr)
 		return;
+	pwrscale->enabled = false;
 	if (pwrscale->cooling_dev)
 		devfreq_cooling_unregister(pwrscale->cooling_dev);
 
 	kgsl_pwrscale_midframe_timer_cancel(device);
 	flush_workqueue(pwrscale->devfreq_wq);
 	destroy_workqueue(pwrscale->devfreq_wq);
+	pwrscale->devfreq_wq = NULL;
 	devfreq_remove_device(device->pwrscale.devfreqptr);
 	kfree(kgsl_midframe);
 	kgsl_midframe = NULL;
@@ -1144,7 +1169,8 @@ static void do_devfreq_suspend(struct work_struct *work)
 			struct kgsl_pwrscale, devfreq_suspend_ws);
 	struct devfreq *devfreq = pwrscale->devfreqptr;
 
-	devfreq_suspend_device(devfreq);
+	if (devfreq)
+		devfreq_suspend_device(devfreq);
 }
 
 static void do_devfreq_resume(struct work_struct *work)
@@ -1153,7 +1179,8 @@ static void do_devfreq_resume(struct work_struct *work)
 			struct kgsl_pwrscale, devfreq_resume_ws);
 	struct devfreq *devfreq = pwrscale->devfreqptr;
 
-	devfreq_resume_device(devfreq);
+	if (devfreq)
+		devfreq_resume_device(devfreq);
 }
 
 static void do_devfreq_notify(struct work_struct *work)
@@ -1161,6 +1188,9 @@ static void do_devfreq_notify(struct work_struct *work)
 	struct kgsl_pwrscale *pwrscale = container_of(work,
 			struct kgsl_pwrscale, devfreq_notify_ws);
 	struct devfreq *devfreq = pwrscale->devfreqptr;
+
+	if (!devfreq)
+		return;
 
 	srcu_notifier_call_chain(&pwrscale->nh,
 				 ADRENO_DEVFREQ_NOTIFY_RETIRE,

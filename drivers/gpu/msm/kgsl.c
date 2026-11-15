@@ -5340,6 +5340,14 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 	if (status)
 		goto error;
 
+	device->events_wq = alloc_workqueue("kgsl-events",
+		WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS | WQ_HIGHPRI, 0);
+	if (!device->events_wq) {
+		dev_err(device->dev, "Failed to allocate events workqueue\n");
+		status = -ENOMEM;
+		goto error_pwrctrl_close;
+	}
+
 	if (!devm_request_mem_region(device->dev, device->reg_phys,
 				device->reg_len, device->name)) {
 		dev_err(device->dev, "request_mem_region failed\n");
@@ -5428,9 +5436,6 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 				PM_QOS_DEFAULT_VALUE);
 	}
 
-	device->events_wq = alloc_workqueue("kgsl-events",
-		WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS | WQ_HIGHPRI, 0);
-
 	/* Initialize the snapshot engine */
 	kgsl_device_snapshot_init(device);
 
@@ -5442,6 +5447,10 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 error_close_mmu:
 	kgsl_mmu_close(device);
 error_pwrctrl_close:
+	if (device->events_wq) {
+		destroy_workqueue(device->events_wq);
+		device->events_wq = NULL;
+	}
 	kgsl_pwrctrl_close(device);
 error:
 	kgsl_device_debugfs_close(device);
@@ -5452,7 +5461,10 @@ EXPORT_SYMBOL(kgsl_device_platform_probe);
 
 void kgsl_device_platform_remove(struct kgsl_device *device)
 {
-	destroy_workqueue(device->events_wq);
+	if (device->events_wq) {
+		destroy_workqueue(device->events_wq);
+		device->events_wq = NULL;
+	}
 
 	kfree(device->dev->dma_parms);
 	device->dev->dma_parms = NULL;
@@ -5487,10 +5499,21 @@ _flush_mem_workqueue(struct work_struct *work)
 
 static void kgsl_core_exit(void)
 {
+	kgsl_reclaim_close();
+
+	/* Device users must be gone before the shared worker is stopped. */
+	kthread_flush_worker(&kgsl_driver.worker);
+	kthread_stop(kgsl_driver.worker_thread);
+	kgsl_driver.worker_thread = NULL;
+
+	/* Generic work can flush the memory queue, so drain it first. */
+	destroy_workqueue(kgsl_driver.workqueue);
+	kgsl_driver.workqueue = NULL;
+	destroy_workqueue(kgsl_driver.mem_workqueue);
+	kgsl_driver.mem_workqueue = NULL;
+
 	kgsl_events_exit();
 	kgsl_core_debugfs_close();
-
-	kgsl_reclaim_close();
 
 	/*
 	 * We call kgsl_sharedmem_uninit_sysfs() and device_unregister()
@@ -5500,7 +5523,12 @@ static void kgsl_core_exit(void)
 	 */
 	if (kgsl_driver.virtdev.class) {
 		kgsl_sharedmem_uninit_sysfs();
+		kobject_put(kgsl_driver.prockobj);
+		kobject_put(kgsl_driver.ptkobj);
+		kgsl_driver.prockobj = NULL;
+		kgsl_driver.ptkobj = NULL;
 		device_unregister(&kgsl_driver.virtdev);
+		kgsl_driver.virtdev.class = NULL;
 	}
 
 	if (kgsl_driver.class) {
@@ -5513,6 +5541,7 @@ static void kgsl_core_exit(void)
 	kfree(memfree.list);
 	memset(&memfree, 0, sizeof(memfree));
 
+	cdev_del(&kgsl_driver.cdev);
 	unregister_chrdev_region(kgsl_driver.major,
 		ARRAY_SIZE(kgsl_driver.devp));
 }
@@ -5529,7 +5558,7 @@ static int __init kgsl_core_init(void)
 	if (result < 0) {
 
 		pr_err("kgsl: alloc_chrdev_region failed err = %d\n", result);
-		goto err;
+		return result;
 	}
 
 	cdev_init(&kgsl_driver.cdev, &kgsl_fops);
@@ -5541,7 +5570,7 @@ static int __init kgsl_core_init(void)
 	if (result) {
 		pr_err("kgsl: cdev_add() failed, dev_num= %d,result= %d\n",
 				kgsl_driver.major, result);
-		goto err;
+		goto err_chrdev;
 	}
 
 	kgsl_driver.class = class_create(THIS_MODULE, "kgsl");
@@ -5549,7 +5578,8 @@ static int __init kgsl_core_init(void)
 	if (IS_ERR(kgsl_driver.class)) {
 		result = PTR_ERR(kgsl_driver.class);
 		pr_err("kgsl: failed to create class for kgsl\n");
-		goto err;
+		kgsl_driver.class = NULL;
+		goto err_cdev;
 	}
 
 	/*
@@ -5561,7 +5591,9 @@ static int __init kgsl_core_init(void)
 	result = device_register(&kgsl_driver.virtdev);
 	if (result) {
 		pr_err("kgsl: driver_register failed\n");
-		goto err;
+		put_device(&kgsl_driver.virtdev);
+		kgsl_driver.virtdev.class = NULL;
+		goto err_class;
 	}
 
 	/* Make kobjects in the virtual device for storing statistics */
@@ -5585,8 +5617,20 @@ static int __init kgsl_core_init(void)
 	kgsl_driver.workqueue = alloc_workqueue("kgsl-workqueue",
 		WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
 
+	if (!kgsl_driver.workqueue) {
+		pr_err("kgsl: Failed to allocate kgsl workqueue\n");
+		result = -ENOMEM;
+		goto err_sysfs;
+	}
+
 	kgsl_driver.mem_workqueue = alloc_workqueue("kgsl-mementry",
 		WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+
+	if (!kgsl_driver.mem_workqueue) {
+		pr_err("kgsl: Failed to allocate mem workqueue\n");
+		result = -ENOMEM;
+		goto err_workqueue;
+	}
 
 	INIT_WORK(&kgsl_driver.mem_work, _flush_mem_workqueue);
 
@@ -5597,7 +5641,9 @@ static int __init kgsl_core_init(void)
 
 	if (IS_ERR(kgsl_driver.worker_thread)) {
 		pr_err("kgsl: unable to start kgsl thread\n");
-		goto err;
+		result = PTR_ERR(kgsl_driver.worker_thread);
+		kgsl_driver.worker_thread = NULL;
+		goto err_memqueue;
 	}
 
 	sched_setscheduler(kgsl_driver.worker_thread, SCHED_FIFO, &param);
@@ -5606,15 +5652,50 @@ static int __init kgsl_core_init(void)
 
 	result = kgsl_drawobjs_cache_init();
 	if (result)
-		goto err;
+		goto err_caches;
 
 	memfree.list = kcalloc(MEMFREE_ENTRIES, sizeof(struct memfree_entry),
 		GFP_KERNEL);
 
 	return 0;
 
-err:
-	kgsl_core_exit();
+err_caches:
+	kthread_flush_worker(&kgsl_driver.worker);
+	kthread_stop(kgsl_driver.worker_thread);
+	kgsl_driver.worker_thread = NULL;
+	destroy_workqueue(kgsl_driver.workqueue);
+	kgsl_driver.workqueue = NULL;
+	destroy_workqueue(kgsl_driver.mem_workqueue);
+	kgsl_driver.mem_workqueue = NULL;
+	kgsl_drawobjs_cache_exit();
+	kgsl_events_exit();
+	goto err_sysfs;
+err_memqueue:
+	destroy_workqueue(kgsl_driver.workqueue);
+	kgsl_driver.workqueue = NULL;
+	destroy_workqueue(kgsl_driver.mem_workqueue);
+	kgsl_driver.mem_workqueue = NULL;
+	goto err_sysfs;
+err_workqueue:
+	destroy_workqueue(kgsl_driver.workqueue);
+	kgsl_driver.workqueue = NULL;
+err_sysfs:
+	kgsl_sharedmem_uninit_sysfs();
+	kgsl_core_debugfs_close();
+	kobject_put(kgsl_driver.prockobj);
+	kobject_put(kgsl_driver.ptkobj);
+	kgsl_driver.prockobj = NULL;
+	kgsl_driver.ptkobj = NULL;
+	device_unregister(&kgsl_driver.virtdev);
+	kgsl_driver.virtdev.class = NULL;
+err_class:
+	class_destroy(kgsl_driver.class);
+	kgsl_driver.class = NULL;
+err_cdev:
+	cdev_del(&kgsl_driver.cdev);
+err_chrdev:
+	unregister_chrdev_region(kgsl_driver.major,
+		ARRAY_SIZE(kgsl_driver.devp));
 	return result;
 }
 
