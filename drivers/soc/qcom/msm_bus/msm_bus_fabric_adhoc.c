@@ -505,7 +505,7 @@ static int msm_bus_enable_node_qos_clk(struct msm_bus_node_device_type *node)
 {
 	struct msm_bus_node_device_type *bus_node = NULL;
 	int i;
-	int ret;
+	int ret = 0;
 	long rounded_rate;
 
 	if (!node || (!to_msm_bus_node(node->node_info->bus_device))) {
@@ -513,6 +513,23 @@ static int msm_bus_enable_node_qos_clk(struct msm_bus_node_device_type *node)
 		goto exit_enable_node_qos_clk;
 	}
 	bus_node = to_msm_bus_node(node->node_info->bus_device);
+
+	/* Check both arrays before changing any QoS clock state. */
+	for (i = 0; i < node->num_node_qos_clks; i++) {
+		if (IS_ERR_OR_NULL(node->node_qos_clks[i].clk)) {
+			ret = IS_ERR(node->node_qos_clks[i].clk) ?
+				PTR_ERR(node->node_qos_clks[i].clk) : -ENODEV;
+			goto exit_enable_node_qos_clk;
+		}
+	}
+
+	for (i = 0; i < bus_node->num_node_qos_clks; i++) {
+		if (IS_ERR_OR_NULL(bus_node->node_qos_clks[i].clk)) {
+			ret = IS_ERR(bus_node->node_qos_clks[i].clk) ?
+				PTR_ERR(bus_node->node_qos_clks[i].clk) : -ENODEV;
+			goto exit_enable_node_qos_clk;
+		}
+	}
 
 	for (i = 0; i < node->num_node_qos_clks; i++) {
 		if (!node->node_qos_clks[i].enable_only_clk) {
