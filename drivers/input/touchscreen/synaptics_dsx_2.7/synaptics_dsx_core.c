@@ -37,6 +37,7 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/input.h>
+#include <linux/input/bbry_nav_guard.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
@@ -1888,7 +1889,9 @@ static void synaptics_rmi4_f1a_report(struct synaptics_rmi4_data *rmi4_data,
 				f1a->button_map[button],
 				status);
 #ifdef NO_0D_WHILE_2D
-		if (rmi4_data->fingers_on_2d == false) {
+		/* Reuse the existing press suppression and release bookkeeping. */
+		if (!rmi4_data->fingers_on_2d &&
+		    !(status && bbry_nav_guard_active())) {
 			if (status == 1) {
 				f1a->before_2d_status[button] = 1;
 			} else {

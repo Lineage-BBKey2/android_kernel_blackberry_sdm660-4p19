@@ -19,6 +19,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/of_gpio.h>
+#include <linux/input/bbry_nav_guard.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/regulator/consumer.h>
 #include <linux/kthread.h>
@@ -27,6 +28,8 @@
 #include <linux/time.h>
 #include <linux/version.h>
 #include <linux/random.h>
+#include <linux/spinlock.h>
+#include <linux/timekeeping.h>
 #ifdef BBRY_PROXI_CHECK
 #include <linux/sensors.h>
 #endif
@@ -1014,12 +1017,78 @@ static void stmpe_input_event_disconnect(struct input_handle *handle)
 	kfree(handle);
 }
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+#define BBRY_NAV_GUARD_TAIL_MS 75
+
+/* The keypad IRQ and the adjacent-key timer can both report keys. */
+static DEFINE_SPINLOCK(bbry_nav_guard_lock);
+static unsigned long bbry_nav_guard_keys;
+static ktime_t bbry_nav_guard_until;
+
+bool bbry_nav_guard_active(void)
+{
+	unsigned long flags;
+	bool active;
+
+	spin_lock_irqsave(&bbry_nav_guard_lock, flags);
+	active = ktime_before(ktime_get(), bbry_nav_guard_until);
+	spin_unlock_irqrestore(&bbry_nav_guard_lock, flags);
+
+	return active;
+}
+EXPORT_SYMBOL_GPL(bbry_nav_guard_active);
+
+static void bbry_nav_guard_reset(void)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&bbry_nav_guard_lock, flags);
+	bbry_nav_guard_keys = 0;
+	bbry_nav_guard_until = 0;
+	spin_unlock_irqrestore(&bbry_nav_guard_lock, flags);
+}
+
+static void bbry_nav_guard_note_key(unsigned int key, key_event_type_t type)
+{
+	unsigned long flags;
+	unsigned long bit;
+	ktime_t now;
+
+	if (key < KEY_Q || key > KEY_P)
+		return;
+
+	bit = BIT(key - KEY_Q);
+	spin_lock_irqsave(&bbry_nav_guard_lock, flags);
+	now = ktime_get();
+	if (!ktime_before(now, bbry_nav_guard_until))
+		bbry_nav_guard_keys = 0;
+
+	if (type == KEY_EVENT_DOWN && !(bbry_nav_guard_keys & bit)) {
+		bbry_nav_guard_keys |= bit;
+	} else if (type == KEY_EVENT_UP && (bbry_nav_guard_keys & bit)) {
+		bbry_nav_guard_keys &= ~bit;
+	} else {
+		goto unlock;
+	}
+
+	/* Use the keypad's stuck-key interval to recover from a lost release. */
+	bbry_nav_guard_until = ktime_add_ms(now, bbry_nav_guard_keys ?
+				KEYPAD_STUCK_KEY_TIME * MSEC_PER_SEC :
+				BBRY_NAV_GUARD_TAIL_MS);
+unlock:
+	spin_unlock_irqrestore(&bbry_nav_guard_lock, flags);
+}
+#else
+static inline void bbry_nav_guard_reset(void) {}
+#endif
+
 static int stmpe_keypad_configure(struct stmpe_keypad *keypad)
 {
 	int ret = 0;
 	u8 scan_frequency;
 
 	mutex_lock(&keypad->keypad_mutex);
+	bbry_nav_guard_reset();
 
 	ret = write_reg(keypad, REG_KPC_CMD, KPC_CMD_SCAN_DISABLE);
 	if (ret < 0)
@@ -1181,6 +1250,10 @@ int stmpe_inject_key(struct stmpe_keypad *keypad, uint8_t key,
 			first_row_key_status &= ~(1 << (key-16));
 		}
 	}
+#endif
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+	if (READ_ONCE(keypad->display_state) == DISPLAY_ON)
+		bbry_nav_guard_note_key(key, type);
 #endif
 	input_event(keypad->input_dev, EV_MSC, MSC_SCAN,
 					keypad->keys[key].code);
@@ -1573,6 +1646,7 @@ static int stmpe_enable_keypad(struct stmpe_keypad *keypad, bool enable)
 				}
 			}
 
+			bbry_nav_guard_reset();
 			keypad->keypad_enabled = false;
 		}
 	}
@@ -1603,10 +1677,12 @@ static int stmpe_keypad_fb_notif(struct notifier_block *self,
 
 	fb_blank = *(int *)evdata->data;
 
-	if (FB_BLANK_UNBLANK == fb_blank)
-		keypad->display_state = DISPLAY_ON;
-	else
-		keypad->display_state = DISPLAY_OFF;
+	if (FB_BLANK_UNBLANK == fb_blank) {
+		WRITE_ONCE(keypad->display_state, DISPLAY_ON);
+	} else {
+		WRITE_ONCE(keypad->display_state, DISPLAY_OFF);
+		bbry_nav_guard_reset();
+	}
 #if 0
 	if (keypad->keypad_enabled) {
 		flush_workqueue(keypad->workqueue);
@@ -2105,6 +2181,7 @@ void stmp_keypad_fb_wq(struct work_struct *work)
 
 static int stmpe_keypad_remove(struct i2c_client *client)
 {
+	bbry_nav_guard_reset();
 	dev_err(&client->dev, "%s: exiting stmpe-keypad!\n", __func__);
 	return 0;
 }

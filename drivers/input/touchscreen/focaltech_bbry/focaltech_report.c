@@ -37,6 +37,7 @@
 *******************************************************************************/
 #include <linux/kthread.h>
 #include <linux/timekeeping.h>
+#include <linux/input/bbry_nav_guard.h>
 #include "focaltech_comm.h"
 #include "focaltech_core.h"
 
@@ -154,6 +155,10 @@ enum fts_report_mode {
 };
 
 static int g_report_mode = FTS_REPORT_MODE_ACTIVE;
+
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+static unsigned long fts_guarded_vkey_slots;
+#endif
 
 struct fts_host_dt2w_state {
 	bool touch_active;
@@ -399,6 +404,9 @@ int fts_report_exit(struct i2c_client *client, void *platform_data)
 int fts_report_resume(void)
 {
 	fts_host_dt2w_reset();
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+	WRITE_ONCE(fts_guarded_vkey_slots, 0UL);
+#endif
 	g_report_mode = FTS_REPORT_MODE_ACTIVE;
 	return 0;
 }
@@ -791,6 +799,12 @@ static int fts_input_dev_report_B(struct ts_event *data)
 	int up_point = 0;
  	int touchs = 0;
 	static int last_touchs = 0;
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+	unsigned long guarded_slots = READ_ONCE(fts_guarded_vkey_slots);
+	unsigned long next_guarded_slots = 0;
+	bool guard_active = !FTS_KEY_EN && bbry_nav_guard_active();
+	int display_max_y = input_abs_get_max(g_input_dev, ABS_MT_POSITION_Y);
+#endif
 	//int touchs_count = 0;
 
 	/*is Key Event?*/
@@ -799,6 +813,25 @@ static int fts_input_dev_report_B(struct ts_event *data)
 
 	for (i = 0; i < data->touch_point; i++)
 	{
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+		unsigned long slot = BIT(data->au8_finger_id[i]);
+		bool active = data->au8_touch_event[i] == DOWN_EVENT ||
+			      data->au8_touch_event[i] == CONTACT_EVENT;
+
+		/*
+		 * Livata reports its nav strip as MT contacts below the display.
+		 * Android maps these contacts through virtualkeys. Suppress only
+		 * new contacts and keep rejected slots hidden through lift.
+		 */
+		if ((guarded_slots & slot) ||
+		    (active && !(last_touchs & slot) && guard_active &&
+		     data->au16_y[i] > display_max_y)) {
+			if (active)
+				next_guarded_slots |= slot;
+			up_point++;
+			continue;
+		}
+#endif
 		 /* Skip touches in the virtual key zone when fts_buttons_enabled is disabled */
 		 if (!fts_get_buttons_enabled() && FTS_KEY_ALL_Y_POS == data->au16_y[i])
 			continue;
@@ -863,6 +896,9 @@ static int fts_input_dev_report_B(struct ts_event *data)
 			touchs,last_touchs,data->touch_point, up_point);
 	#endif
 	last_touchs = touchs;
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
+	WRITE_ONCE(fts_guarded_vkey_slots, next_guarded_slots);
+#endif
 
 	if(data->touch_point == up_point)
 		{

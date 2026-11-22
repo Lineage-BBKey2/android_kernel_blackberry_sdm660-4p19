@@ -197,6 +197,13 @@ config INPUT_KEYCOMBO
 	help
 	  Say Y here if you want to take action when some keys are pressed;
 
+config BBRY_KEYBOARD_NAV_GUARD
+	bool "BlackBerry keyboard navigation key guard"
+	depends on KEYBOARD_STMPE_BBRY = y
+	help
+	  Suppress new capacitive navigation presses while top-row keyboard
+	  keys are being used. Enable this for the BlackBerry Key2.
+
 comment "Input Device Drivers"
 
 source "drivers/input/keyboard/Kconfig"
