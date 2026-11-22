@@ -204,6 +204,13 @@ config BBRY_KEYBOARD_NAV_GUARD
 	  Suppress new capacitive navigation presses while top-row keyboard
 	  keys are being used. Enable this for the BlackBerry Key2.
 
+config BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	bool "BlackBerry keyboard upward-swipe navigation guard"
+	depends on BBRY_KEYBOARD_NAV_GUARD && TOUCHSCREEN_SYNAPTICS_DSX_BBRY
+	help
+	  Briefly suppress new capacitive navigation presses during upward
+	  swipes near the top edge of the BlackBerry Key2 touch keyboard.
+
 comment "Input Device Drivers"
 
 source "drivers/input/keyboard/Kconfig"

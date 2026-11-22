@@ -27,6 +27,7 @@
 #include <linux/timer.h>
 #include <linux/delay.h>
 #include <linux/input.h>
+#include <linux/input/bbry_nav_guard.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/reboot.h>
@@ -4155,6 +4156,38 @@ static void synaptics_rmi4_force_cal_work(struct work_struct *work)
 
 #define BBRY_SCALE_Y_POS(y_in,y_min,y_max,y_scale_min,y_scale_max)   (((y_in*(y_max-y_min))/(y_scale_max-y_scale_min))+(y_min-((y_scale_min*(y_max-y_min))/(y_scale_max-y_scale_min))))
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+#define BBRY_NAV_SWIPE_TOP_Y 140
+#define BBRY_NAV_SWIPE_MIN_TRAVEL 50
+#define BBRY_NAV_SWIPE_MIN_PROGRESS 2
+
+/* Called with rmi4_report_mutex held and one keyboard contact present. */
+static void synaptics_rmi4_note_nav_swipe(struct synaptics_rmi4_data *rmi4_data,
+					unsigned int finger, int y)
+{
+	if (!rmi4_data->nav_swipe_tracking ||
+	    rmi4_data->nav_swipe_finger != finger) {
+		rmi4_data->nav_swipe_tracking = true;
+		rmi4_data->nav_swipe_finger = finger;
+		rmi4_data->nav_swipe_start_y = y;
+		rmi4_data->nav_swipe_min_y = y;
+		return;
+	}
+
+	/*
+	 * Renew the deadline only for a new low Y. This lets it expire
+	 * while the finger rests or after it leaves the keyboard.
+	 */
+	if (rmi4_data->nav_swipe_min_y - y < BBRY_NAV_SWIPE_MIN_PROGRESS)
+		return;
+
+	rmi4_data->nav_swipe_min_y = y;
+	if (y <= BBRY_NAV_SWIPE_TOP_Y &&
+	    rmi4_data->nav_swipe_start_y - y > BBRY_NAV_SWIPE_MIN_TRAVEL)
+		bbry_nav_guard_note_swipe();
+}
+#endif
+
  /**
  * synaptics_rmi4_f12_abs_report
  *
@@ -4174,6 +4207,9 @@ static int synaptics_rmi4_f12_abs_report(
 	int retval;
 	unsigned char touch_count = 0; /* number of touch points */
 	bool slider_in_transition;
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	bool track_nav_swipe;
+#endif
 	unsigned char finger;
 	unsigned char fingers_to_process;
 	unsigned char finger_status;
@@ -4373,6 +4409,11 @@ static int synaptics_rmi4_f12_abs_report(
 		rmi4_data->ignore_touch = false;
 	} else if (false != rmi4_data->ignore_touch) {
 		/* simply ignore the touches while ignore_touch is set */
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+		mutex_lock(&rmi4_data->rmi4_report_mutex);
+		rmi4_data->nav_swipe_tracking = false;
+		mutex_unlock(&rmi4_data->rmi4_report_mutex);
+#endif
 		dev_dbg(rmi4_data->pdev->dev.parent,
 			"%s: ignore_touch=%d, ignoring touches\n",
 			__func__, rmi4_data->ignore_touch);
@@ -4381,6 +4422,13 @@ static int synaptics_rmi4_f12_abs_report(
 
 	mutex_lock(&(rmi4_data->rmi4_report_mutex));
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	track_nav_swipe = touch_count == 1 && !rmi4_data->turn_off &&
+			 !rmi4_data->suspend && bdata->input_dev_name &&
+			 !strcmp(bdata->input_dev_name, "touch_keypad");
+	if (!track_nav_swipe)
+		rmi4_data->nav_swipe_tracking = false;
+#endif
 	touch_count = 0;
 	rmi4_data->touch_obj_cnt = 0;
 	for (finger = 0; finger < fingers_to_process; finger++) {
@@ -4439,6 +4487,10 @@ static int synaptics_rmi4_f12_abs_report(
 			}
 			// end Scale Y
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+			if (track_nav_swipe)
+				synaptics_rmi4_note_nav_swipe(rmi4_data, finger, y);
+#endif
 			if (!rmi4_data->turn_off || !IGNORE_TURN_OFF_FLAG) {
 				input_report_key(rmi4_data->input_dev,
 						BTN_TOUCH, 1);
@@ -4616,6 +4668,9 @@ static int synaptics_rmi4_f12_abs_report(
 	}
 
 	if (touch_count == 0) {
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+		rmi4_data->nav_swipe_tracking = false;
+#endif
 #ifdef F12_DATA_15_WORKAROUND
 		rmi4_data->fingers_already_present = 0;
 #endif
@@ -6547,6 +6602,9 @@ static int synaptics_rmi4_free_fingers(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&(rmi4_data->rmi4_report_mutex));
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	rmi4_data->nav_swipe_tracking = false;
+#endif
 #ifdef CONFIG_CKB_MASK_KEY
 	mask_on = 0;
 	if (btn_mask_on_notif)

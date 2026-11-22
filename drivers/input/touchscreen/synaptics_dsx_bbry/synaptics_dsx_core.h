@@ -525,6 +525,12 @@ struct synaptics_rmi4_data {
 	bool proxi_check;
 	bool face_detection_check;
 	bool touch_state;
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	bool nav_swipe_tracking;
+	unsigned int nav_swipe_finger;
+	int nav_swipe_start_y;
+	int nav_swipe_min_y;
+#endif
 	struct synaptics_wakeup_gesture wakeup_gesture;
 	struct synaptics_f51_extra_wakeup_info extra_wakeup_info;
 #ifdef F12_DATA_15_WORKAROUND

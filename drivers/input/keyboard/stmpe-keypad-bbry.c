@@ -1025,13 +1025,34 @@ static DEFINE_SPINLOCK(bbry_nav_guard_lock);
 static unsigned long bbry_nav_guard_keys;
 static ktime_t bbry_nav_guard_until;
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+#define BBRY_NAV_SWIPE_GUARD_MS 25
+
+static ktime_t bbry_nav_swipe_until;
+
+void bbry_nav_guard_note_swipe(void)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&bbry_nav_guard_lock, flags);
+	bbry_nav_swipe_until = ktime_add_ms(ktime_get(), BBRY_NAV_SWIPE_GUARD_MS);
+	spin_unlock_irqrestore(&bbry_nav_guard_lock, flags);
+}
+EXPORT_SYMBOL_GPL(bbry_nav_guard_note_swipe);
+#endif
+
 bool bbry_nav_guard_active(void)
 {
 	unsigned long flags;
+	ktime_t now;
 	bool active;
 
 	spin_lock_irqsave(&bbry_nav_guard_lock, flags);
-	active = ktime_before(ktime_get(), bbry_nav_guard_until);
+	now = ktime_get();
+	active = ktime_before(now, bbry_nav_guard_until);
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	active = active || ktime_before(now, bbry_nav_swipe_until);
+#endif
 	spin_unlock_irqrestore(&bbry_nav_guard_lock, flags);
 
 	return active;
@@ -1045,6 +1066,9 @@ static void bbry_nav_guard_reset(void)
 	spin_lock_irqsave(&bbry_nav_guard_lock, flags);
 	bbry_nav_guard_keys = 0;
 	bbry_nav_guard_until = 0;
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+	bbry_nav_swipe_until = 0;
+#endif
 	spin_unlock_irqrestore(&bbry_nav_guard_lock, flags);
 }
 

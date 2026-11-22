@@ -4,6 +4,10 @@
 
 #include <linux/types.h>
 
+#ifdef CONFIG_BBRY_KEYBOARD_NAV_SWIPE_GUARD
+void bbry_nav_guard_note_swipe(void);
+#endif
+
 #ifdef CONFIG_BBRY_KEYBOARD_NAV_GUARD
 bool bbry_nav_guard_active(void);
 #else
