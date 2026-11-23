@@ -933,6 +933,12 @@
 /* MODIFIED-END by Xiaoyun.Wei,BUG-5294788*/
 
 
+/*
+ * The fuel gauge looks up qcom,battery-data by name and finds the
+ * inherited MTP table first. Keep only Luna's retail battery table.
+ */
+/delete-node/ &mtp_batterydata;
+
 / {
 	luna_batterydata: qcom,battery-data {
 		qcom,batt-id-range-pct = <15>;
