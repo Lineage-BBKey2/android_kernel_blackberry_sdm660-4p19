@@ -582,7 +582,7 @@ int fib_nh_init(struct net *net, struct fib_nh *nh,
 		net->ipv4.fib_num_tclassid_users++;
 #endif
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	nh->nh_weight = nh_weight;
+	nh->fib_nh_weight = nh_weight;
 #endif
 	return 0;
 }
