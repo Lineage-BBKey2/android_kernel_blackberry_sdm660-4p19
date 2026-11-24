@@ -15,6 +15,7 @@
 #include <net/netfilter/nft_fib.h>
 
 #include <net/ip_fib.h>
+#include <net/nexthop.h>
 #include <net/route.h>
 
 /* don't try to find route from mcast/bcast/zeronet */
@@ -153,11 +154,11 @@ void nft_fib4_eval(const struct nft_expr *expr, struct nft_regs *regs,
        }
 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	for (i = 0; i < res.fi->fib_nhs; i++) {
-		struct fib_nh *nh = &res.fi->fib_nh[i];
+	for (i = 0; i < fib_info_num_path(res.fi); i++) {
+		const struct fib_nh_common *nhc = fib_info_nhc(res.fi, i);
 
-		if (nh->nh_dev == oif) {
-			found = nh->nh_dev;
+		if (nhc && nhc->nhc_dev == oif) {
+			found = nhc->nhc_dev;
 			goto ok;
 		}
 	}

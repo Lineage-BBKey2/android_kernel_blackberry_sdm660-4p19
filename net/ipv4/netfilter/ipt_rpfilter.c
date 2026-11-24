@@ -14,6 +14,7 @@
 #include <linux/ip.h>
 #include <net/ip.h>
 #include <net/ip_fib.h>
+#include <net/nexthop.h>
 #include <net/route.h>
 
 #include <linux/netfilter/xt_rpfilter.h>
@@ -48,10 +49,10 @@ static bool rpfilter_lookup_reverse(struct net *net, struct flowi4 *fl4,
 	}
 	dev_match = false;
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	for (ret = 0; ret < res.fi->fib_nhs; ret++) {
-		struct fib_nh *nh = &res.fi->fib_nh[ret];
+	for (ret = 0; ret < fib_info_num_path(res.fi); ret++) {
+		const struct fib_nh_common *nhc = fib_info_nhc(res.fi, ret);
 
-		if (nh->nh_dev == dev) {
+		if (nhc && nhc->nhc_dev == dev) {
 			dev_match = true;
 			break;
 		}
