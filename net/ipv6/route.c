@@ -5621,12 +5621,19 @@ static int rt6_nh_dump_exceptions(struct fib6_nh *nh, void *arg)
 	struct rt6_exception *rt6_ex;
 	int i, err;
 
+	if (dump->filter.dev && nh->fib_nh_dev != dump->filter.dev)
+		return 0;
+
 	bucket = fib6_nh_get_excptn_bucket(nh, NULL);
 	if (!bucket)
 		return 0;
 
 	for (i = 0; i < FIB6_EXCEPTION_BUCKET_SIZE; i++) {
 		hlist_for_each_entry_rcu(rt6_ex, &bucket->chain, hlist) {
+			/* A shared nexthop may cache exceptions for other routes. */
+			if (rcu_access_pointer(rt6_ex->rt6i->from) != w->rt)
+				continue;
+
 			if (w->skip) {
 				w->skip--;
 				continue;
@@ -5721,12 +5728,24 @@ int rt6_dump_route(struct fib6_info *rt, void *p_arg, unsigned int skip)
 						       rt6_nh_dump_exceptions,
 						       &w);
 		} else {
+			struct fib6_info *sibling;
+
 			err = rt6_nh_dump_exceptions(rt->fib6_nh, &w);
+			if (!err && rt->fib6_nsiblings) {
+				list_for_each_entry(sibling, &rt->fib6_siblings,
+						    fib6_siblings) {
+					w.rt = sibling;
+					err = rt6_nh_dump_exceptions(sibling->fib6_nh,
+								     &w);
+					if (err)
+						break;
+				}
+			}
 		}
 		rcu_read_unlock();
 
 		if (err)
-			return count += w.count;
+			return count + w.count;
 	}
 
 	return -1;
